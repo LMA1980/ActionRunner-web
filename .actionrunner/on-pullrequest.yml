@@ -1,0 +1,22 @@
+version: "1"
+name: "ActionRunner-web Pull Request Validation"
+
+env:
+  CARGO_TERM_COLOR: always
+
+steps:
+  - name: "Verify Rust Formatting (cargo fmt)"
+    run: "cargo fmt --check"
+    timeout_seconds: 120
+
+  - name: "Verify Rust Linter & Clippy Rules (cargo clippy)"
+    run: "cargo clippy --all-targets -- -D warnings"
+    timeout_seconds: 300
+
+  - name: "Evaluate Test Suite & Line Code Coverage (cargo llvm-cov)"
+    run: "cargo llvm-cov --summary-only"
+    timeout_seconds: 300
+
+  - name: "Validate WASM32 Release Compilation"
+    run: "cargo build --target wasm32-unknown-unknown --release"
+    timeout_seconds: 600
