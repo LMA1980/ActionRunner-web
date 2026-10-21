@@ -11,11 +11,24 @@ use crate::models::{
 
 fn default_api_base() -> String {
     if let Some(win) = web_sys::window() {
+        let current_origin = win.location().origin().ok();
         if let Ok(search) = win.location().search() {
             for pair in search.trim_start_matches('?').split('&') {
                 if let Some(("api", val)) = pair.split_once('=') {
                     if !val.is_empty() {
-                        return val.trim_end_matches('/').to_string();
+                        let trimmed = val.trim_end_matches('/');
+                        // Security: Only accept same-origin relative paths, localhost for dev, or matching origin
+                        let is_safe = trimmed.starts_with('/')
+                            || trimmed.starts_with("http://127.0.0.1")
+                            || trimmed.starts_with("http://localhost")
+                            || current_origin
+                                .as_deref()
+                                .map(|o| trimmed.starts_with(o))
+                                .unwrap_or(false);
+
+                        if is_safe {
+                            return trimmed.to_string();
+                        }
                     }
                 }
             }
