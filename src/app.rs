@@ -320,7 +320,12 @@ pub fn App() -> impl IntoView {
                         class=move || if auto_refresh.get() { "btn btn-active" } else { "btn" }
                         on:click=move |_| auto_refresh.update(|v| *v = !*v)
                     >
-                        {move || if auto_refresh.get() { "⟳ Auto-Refresh: ON (3s)" } else { "⏸ Auto-Refresh: PAUSED" }}
+                        <span class="btn-text-full">
+                            {move || if auto_refresh.get() { "⟳ Auto-Refresh: ON (3s)" } else { "⏸ Auto-Refresh: PAUSED" }}
+                        </span>
+                        <span class="btn-text-short">
+                            {move || if auto_refresh.get() { "⟳ Auto: ON" } else { "⏸ Auto: OFF" }}
+                        </span>
                     </button>
 
                     <button class="btn btn-primary" on:click=move |_| refresh_all()>
@@ -485,6 +490,7 @@ pub fn App() -> impl IntoView {
                                     <div class="filter-bar">
                                         <select
                                             class="select-input"
+                                            aria-label="Filter jobs by repository"
                                             on:change=move |ev| repo_filter.set(event_target_value(&ev))
                                         >
                                             <option value="all">"All Repositories"</option>
@@ -494,22 +500,25 @@ pub fn App() -> impl IntoView {
                                             }).collect_view()}
                                         </select>
 
-                                        <div class="status-tabs">
+                                        <div class="status-tabs" role="tablist" aria-label="Filter jobs by status">
                                             {[
-                                                ("all", "All"),
-                                                ("running", "Running"),
-                                                ("queued", "Queued"),
-                                                ("passing", "Passing"),
-                                                ("failing", "Failing"),
-                                                ("skipped", "Skipped / Coalesced"),
-                                            ].into_iter().map(|(val, label)| {
+                                                ("all", "All", "All"),
+                                                ("running", "Running", "Running"),
+                                                ("queued", "Queued", "Queued"),
+                                                ("passing", "Passing", "Passing"),
+                                                ("failing", "Failing", "Failing"),
+                                                ("skipped", "Skipped / Coalesced", "Skipped"),
+                                            ].into_iter().map(|(val, full_label, short_label)| {
                                                 let v = val.to_string();
                                                 view! {
                                                     <button
+                                                        type="button"
+                                                        role="tab"
                                                         class=move || if status_filter.get() == val { "tab-btn tab-active" } else { "tab-btn" }
                                                         on:click=move |_| status_filter.set(v.clone())
                                                     >
-                                                        {label}
+                                                        <span class="tab-label-full">{full_label}</span>
+                                                        <span class="tab-label-short">{short_label}</span>
                                                     </button>
                                                 }
                                             }).collect_view()}
@@ -518,6 +527,7 @@ pub fn App() -> impl IntoView {
                                         <input
                                             type="text"
                                             class="search-input"
+                                            aria-label="Filter jobs by query"
                                             placeholder="Filter by SHA, branch, sender, job ID..."
                                             prop:value=move || search_query.get()
                                             on:input=move |ev| search_query.set(event_target_value(&ev))
@@ -817,14 +827,18 @@ pub fn App() -> impl IntoView {
                                                     <div class="panel-header">
                                                         <h2 class="panel-title">"Build & Execution Logs"</h2>
                                                         <div class="filter-bar">
-                                                            <div class="status-tabs">
+                                                            <div class="status-tabs" role="tablist" aria-label="Log viewer mode">
                                                                 <button
+                                                                    type="button"
+                                                                    role="tab"
                                                                     class=move || if log_view_mode.get() == "steps" { "tab-btn tab-active" } else { "tab-btn" }
                                                                     on:click=move |_| log_view_mode.set("steps".to_string())
                                                                 >
                                                                     "Structured Steps"
                                                                 </button>
                                                                 <button
+                                                                    type="button"
+                                                                    role="tab"
                                                                     class=move || if log_view_mode.get() == "raw" { "tab-btn tab-active" } else { "tab-btn" }
                                                                     on:click=move |_| log_view_mode.set("raw".to_string())
                                                                 >
@@ -835,6 +849,7 @@ pub fn App() -> impl IntoView {
                                                             <input
                                                                 type="text"
                                                                 class="search-input"
+                                                                aria-label="Filter log lines"
                                                                 placeholder="Filter log lines..."
                                                                 prop:value=move || log_search.get()
                                                                 on:input=move |ev| log_search.set(event_target_value(&ev))
