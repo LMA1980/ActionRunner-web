@@ -92,4 +92,4 @@ cargo test
 
 ## License
 
-Licensed under the Apache License, Version 2.0.
+Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0-only). See [LICENSE](LICENSE) for details.

@@ -3,7 +3,7 @@ name = "action-runner-web"
 version = "0.1.0"
 edition = "2021"
 description = "Leptos WASM Queue Monitor & Job Drill-Down Web UI for ActionRunner-rs on SpacemiT K3"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 repository = "https://github.com/LMA1980/ActionRunner-web"
 
 [dependencies]
