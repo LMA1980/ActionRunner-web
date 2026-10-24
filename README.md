@@ -68,16 +68,24 @@ High-performance WebAssembly queue monitoring and job drill-down frontend built 
 
 ## Building & Verification
 
-### Local Development with Trunk
+### Production Release Packaging (No Trunk Required)
+The production bundle is compiled and packaged directly via standard `cargo` and `wasm-bindgen`, with automated content-hash cache-busting:
 ```bash
-# Build and serve locally with hot reloading
-trunk serve
+# Compile optimized WebAssembly bundle and package into ./dist
+./scripts/build-dist.sh
 ```
 
-### Production Release Build
+Or manually:
 ```bash
-# Compile optimized WebAssembly release bundle to ./dist
-trunk build --release
+cargo build --target wasm32-unknown-unknown --release
+wasm-bindgen --target web --out-dir dist --out-name action-runner-web target/wasm32-unknown-unknown/release/action-runner-web.wasm
+cp style.css dist/
+```
+
+### Optional: Local Development with Trunk
+If `trunk` is installed, it can optionally be used for live hot-reload development:
+```bash
+trunk serve
 ```
 
 ### Native Tests & Linter Hygiene
