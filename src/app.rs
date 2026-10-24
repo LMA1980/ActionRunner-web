@@ -1221,13 +1221,51 @@ pub fn App() -> impl IntoView {
                         let base = api_base.get();
                         let now = Utc::now();
 
+                        let resume_action = {
+                            let jid = job_id.clone();
+                            let base = base.clone();
+                            move |_| {
+                                let jid = jid.clone();
+                                let base = base.clone();
+                                spawn_local(async move {
+                                    let url = format!("{}/api/jobs/{}/resume", base, jid);
+                                    let _ = gloo_net::http::Request::post(&url).send().await;
+                                    refresh_all();
+                                });
+                            }
+                        };
+
+                        let restart_action = {
+                            let jid = job_id.clone();
+                            let base = base.clone();
+                            move |_| {
+                                let jid = jid.clone();
+                                let base = base.clone();
+                                spawn_local(async move {
+                                    let url = format!("{}/api/jobs/{}/restart", base, jid);
+                                    let _ = gloo_net::http::Request::post(&url).send().await;
+                                    refresh_all();
+                                });
+                            }
+                        };
+
                         view! {
                             <div class="drilldown-view">
-                                <div class="drilldown-nav">
-                                    <button class="btn" on:click=close_drilldown>
-                                        "← Back to Queue & Jobs Monitor"
-                                    </button>
-                                    <span class="mono muted-text">{format!("Job ID: {}", job_id)}</span>
+                                <div class="drilldown-nav" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                                    <div style="display: flex; align-items: center; gap: 12px;">
+                                        <button class="btn" on:click=close_drilldown>
+                                            "← Back to Queue & Jobs Monitor"
+                                        </button>
+                                        <span class="mono muted-text">{format!("Job ID: {}", job_id)}</span>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <button class="btn" style="color: #60a5fa; border-color: rgba(96, 165, 250, 0.4);" on:click=resume_action title="Resume pipeline: preserves completed stages and re-dispatches interrupted/failed stages">
+                                            "▶ Resume Pipeline"
+                                        </button>
+                                        <button class="btn" style="color: #f87171; border-color: rgba(248, 113, 113, 0.4);" on:click=restart_action title="Full restart: resets all stages back to Pending">
+                                            "↻ Restart All"
+                                        </button>
+                                    </div>
                                 </div>
 
                                 {match rec_opt {
