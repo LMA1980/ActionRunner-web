@@ -759,6 +759,113 @@ body {
   margin-bottom: 14px;
 }
 
+/* Distributed Fabric Nodes */
+.nodes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.node-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.node-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.node-name {
+  font-weight: 600;
+  font-size: 14px;
+  display: inline-block;
+  margin-right: 8px;
+}
+
+.node-pill {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.node-online {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.node-offline {
+  background-color: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.node-metrics-row {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.node-tags-row, .stage-tags-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tag-chip {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+/* DAG Pipeline Stages */
+.stages-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.stage-card {
+  background-color: var(--bg-tile);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.stage-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.stage-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.stage-meta-row {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
 /* ==========================================================================
    Responsive & Mobile Styles (iPhone 18 Pro, iOS WebKit, Small Viewports)
    ========================================================================== */

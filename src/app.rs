@@ -6,7 +6,7 @@ use leptos::task::spawn_local;
 use crate::log_parser::{parse_job_log, StepStatus};
 use crate::models::{
     card_svg_url, extract_repositories, filter_jobs, score_pill_class, short_branch, short_sha,
-    submodule_card_svg_url, JobRecord, JobStatus, JobsListResponse, QueueSnapshot,
+    submodule_card_svg_url, ClusterNodeView, JobRecord, JobStatus, JobsListResponse, QueueSnapshot,
 };
 
 fn default_api_base() -> String {
@@ -168,11 +168,23 @@ async fn fetch_job_log_text(api_base: &str, job_id: &str) -> Result<String, Stri
     }
 }
 
+async fn fetch_cluster_nodes(api_base: &str) -> Result<Vec<ClusterNodeView>, String> {
+    let url = format!("{}/api/cluster/nodes", api_base);
+    match Request::get(&url).send().await {
+        Ok(resp) if resp.ok() => resp
+            .json::<Vec<ClusterNodeView>>()
+            .await
+            .map_err(|e| format!("Failed to parse cluster nodes JSON: {}", e)),
+        _ => Ok(vec![]),
+    }
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     let api_base = RwSignal::new(default_api_base());
     let queue_snap = RwSignal::new(None::<QueueSnapshot>);
     let jobs_list = RwSignal::new(Vec::<JobRecord>::new());
+    let cluster_nodes = RwSignal::new(Vec::<ClusterNodeView>::new());
     let error_banner = RwSignal::new(None::<String>);
     let last_updated = RwSignal::new(String::from("Loading..."));
     let auto_refresh = RwSignal::new(true);
@@ -207,6 +219,10 @@ pub fn App() -> impl IntoView {
                 (Err(e), _) | (_, Err(e)) => {
                     error_banner.set(Some(e));
                 }
+            }
+
+            if let Ok(nodes) = fetch_cluster_nodes(&base).await {
+                cluster_nodes.set(nodes);
             }
 
             if let Some(jid) = current_job_id {
@@ -278,7 +294,7 @@ pub fn App() -> impl IntoView {
         }
     }
 
-    let runner_busy = move || {
+    let _runner_busy = move || {
         queue_snap
             .get()
             .map(|s| s.status == "busy")
@@ -302,15 +318,27 @@ pub fn App() -> impl IntoView {
                 <div class="topbar-brand" on:click=close_drilldown style="cursor: pointer;">
                     <span class="brand-logo">"⚡"</span>
                     <div>
-                        <div class="brand-title">"ActionRunner-rs Factory Pipeline"</div>
-                        <div class="brand-subtitle">"SpacemiT Key Stone K3 (8× X100 RISC-V @ 1.6GHz) • Coalescing FIFO Queue"</div>
+                        <div class="brand-title">"ActionRunner Distributed CI Fabric"</div>
+                        <div class="brand-subtitle">"Tag-Orchestrated Multi-Node Execution • Zero-Copy Arrow Streaming"</div>
                     </div>
                 </div>
 
                 <div class="topbar-controls">
-                    <span class=move || if runner_busy() { "runner-pill runner-busy" } else { "runner-pill runner-idle" }>
-                        {move || if runner_busy() { "⏳ WORKER BUSY (1/1)" } else { "✓ WORKER IDLE (0/1)" }}
-                    </span>
+                    {move || {
+                        let nodes = cluster_nodes.get();
+                        let active: u32 = nodes.iter().map(|n| n.active_slots).sum();
+                        let total: u32 = nodes.iter().map(|n| n.max_slots).sum();
+                        let is_busy = active > 0;
+                        let pill_cls = if is_busy { "runner-pill runner-busy" } else { "runner-pill runner-idle" };
+                        let pill_txt = if is_busy {
+                            format!("⏳ FABRIC BUSY ({}/{})", active, total.max(1))
+                        } else {
+                            format!("✓ FABRIC IDLE (0/{})", total.max(1))
+                        };
+                        view! {
+                            <span class=pill_cls>{pill_txt}</span>
+                        }
+                    }}
 
                     <span class="updated-label">
                         "Synced: " {move || last_updated.get()}
@@ -381,6 +409,56 @@ pub fn App() -> impl IntoView {
                                             <div class="kpi-sub">"Persisted in index"</div>
                                         </div>
                                     </section>
+                                }
+                            }}
+
+                            // Cluster Fabric Nodes Section
+                            {move || {
+                                let nodes = cluster_nodes.get();
+                                if nodes.is_empty() {
+                                    view! { <span /> }.into_any()
+                                } else {
+                                    let online_count = nodes.iter().filter(|n| n.is_online).count();
+                                    view! {
+                                        <section class="panel" style="margin-bottom: 20px;">
+                                            <div class="panel-header">
+                                                <div>
+                                                    <h2 class="panel-title">"Distributed Fabric Nodes"</h2>
+                                                    <div class="panel-subtitle">"Real-time hardware acceleration and execution slot telemetry"</div>
+                                                </div>
+                                                <span class="mono muted-text">{format!("{} online node(s)", online_count)}</span>
+                                            </div>
+                                            <div class="nodes-grid">
+                                                {nodes.into_iter().map(|node| {
+                                                    let status_cls = if node.is_online { "node-pill node-online" } else { "node-pill node-offline" };
+                                                    let status_txt = if node.is_online { "● ONLINE" } else { "○ OFFLINE" };
+                                                    let slots_txt = format!("{}/{} slots", node.active_slots, node.max_slots);
+                                                    let ram_txt = format!("{}/{} MB", node.ram_used_mb, node.ram_total_mb);
+                                                    let cpu_txt = format!("{:.1}% CPU", node.cpu_load_pct);
+                                                    let arch = node.arch.clone();
+                                                    view! {
+                                                        <div class="node-card">
+                                                            <div class="node-card-header">
+                                                                <div>
+                                                                    <div class="node-name">{node.node_id}</div>
+                                                                    <span class="mono-chip">{arch}</span>
+                                                                </div>
+                                                                <span class=status_cls>{status_txt}</span>
+                                                            </div>
+                                                            <div class="node-metrics-row">
+                                                                <span class="node-metric"><strong>"Slots: "</strong>{slots_txt}</span>
+                                                                <span class="node-metric"><strong>"CPU: "</strong>{cpu_txt}</span>
+                                                                <span class="node-metric"><strong>"RAM: "</strong>{ram_txt}</span>
+                                                            </div>
+                                                            <div class="node-tags-row">
+                                                                {node.tags.into_iter().map(|tag| view! { <span class="tag-chip">{tag}</span> }).collect_view()}
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                }).collect_view()}
+                                            </div>
+                                        </section>
+                                    }.into_any()
                                 }
                             }}
 
@@ -738,6 +816,47 @@ pub fn App() -> impl IntoView {
                                                     {callout.map(|(cls, msg)| view! {
                                                         <div class=cls style="margin-top: 12px;">{msg}</div>
                                                     })}
+
+                                                    // DAG Pipeline Stages
+                                                    {
+                                                        let stages = rec.stages.clone();
+                                                        if stages.is_empty() {
+                                                            view! { <span /> }.into_any()
+                                                        } else {
+                                                            view! {
+                                                                <div style="margin-top: 16px;">
+                                                                    <div class="kpi-label" style="margin-bottom: 8px;">"DAG PIPELINE STAGES"</div>
+                                                                    <div class="stages-grid">
+                                                                        {stages.into_iter().map(|s| {
+                                                                            let st_lbl = s.status.badge_label();
+                                                                            let st_cls = s.status.css_class();
+                                                                            let tc = s.toolchain.unwrap_or_else(|| "system".to_string());
+                                                                            let deps = if s.depends_on.is_empty() { "none".to_string() } else { s.depends_on.join(", ") };
+                                                                            view! {
+                                                                                <div class="stage-card">
+                                                                                    <div class="stage-card-header">
+                                                                                        <span class="stage-title">{s.name}</span>
+                                                                                        <span class=st_cls>{st_lbl}</span>
+                                                                                    </div>
+                                                                                    <div class="stage-meta-row">
+                                                                                        <span><span class="meta-label">"Stage: "</span><span class="mono">{s.id}</span></span>
+                                                                                        <span><span class="meta-label">"Threads: "</span><span class="mono">{s.threads}</span></span>
+                                                                                        <span><span class="meta-label">"Toolchain: "</span><span class="mono">{tc}</span></span>
+                                                                                    </div>
+                                                                                    <div class="stage-meta-row" style="margin-top: 4px;">
+                                                                                        <span><span class="meta-label">"Depends: "</span><span class="mono">{deps}</span></span>
+                                                                                    </div>
+                                                                                    <div class="stage-tags-row">
+                                                                                        {s.tags.into_iter().map(|t| view! { <span class="tag-chip">{t}</span> }).collect_view()}
+                                                                                    </div>
+                                                                                </div>
+                                                                            }
+                                                                        }).collect_view()}
+                                                                    </div>
+                                                                </div>
+                                                            }.into_any()
+                                                        }
+                                                    }
 
                                                     // 4 Factory Pipeline Metric Tiles + Live SVG Card Preview
                                                     {metrics_opt.as_ref().map(|m| {

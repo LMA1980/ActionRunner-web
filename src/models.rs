@@ -74,6 +74,30 @@ pub enum StageStatus {
     Skipped { reason: String },
 }
 
+impl StageStatus {
+    pub fn badge_label(&self) -> &'static str {
+        match self {
+            StageStatus::Pending => "⏱ PENDING",
+            StageStatus::Assigned { .. } => "⏳ ASSIGNED",
+            StageStatus::Running { .. } => "⚡ RUNNING",
+            StageStatus::Completed { exit_code: 0, .. } => "✓ PASSED",
+            StageStatus::Completed { .. } | StageStatus::Failed { .. } => "✗ FAILED",
+            StageStatus::Skipped { .. } => "⊘ SKIPPED",
+        }
+    }
+
+    pub fn css_class(&self) -> &'static str {
+        match self {
+            StageStatus::Pending => "status-pill status-queued",
+            StageStatus::Assigned { .. } => "status-pill status-running",
+            StageStatus::Running { .. } => "status-pill status-running",
+            StageStatus::Completed { exit_code: 0, .. } => "status-pill status-passing",
+            StageStatus::Completed { .. } | StageStatus::Failed { .. } => "status-pill status-failing",
+            StageStatus::Skipped { .. } => "status-pill status-skipped",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StageRecord {
     pub id: String,
