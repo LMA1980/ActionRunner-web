@@ -717,9 +717,9 @@ pub fn App() -> impl IntoView {
                                                                         <span class="meta-label">"Latest Stage: "</span>
                                                                         <span class="mono" style="color: #7ee787;">{l}</span>
                                                                     </div>
-                                                                }).into_any()
+                                                                })
                                                             } else {
-                                                                view! {}.into_any()
+                                                                None
                                                             }}
                                                         </div>
                                                         <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
@@ -898,7 +898,7 @@ pub fn App() -> impl IntoView {
                                                                         let jid = job.id.clone();
                                                                         let (status_txt, status_cls) = match &stage.status {
                                                                             StageStatus::Completed { exit_code, .. } if *exit_code == 0 => ("✓ Passed", "status-pill status-completed"),
-                                                                            StageStatus::Completed { exit_code: _, .. } => ("✕ Exit non-zero", "status-pill status-failed"),
+                                                                            StageStatus::Completed { .. } => ("✕ Exit non-zero", "status-pill status-failed"),
                                                                             StageStatus::Failed { .. } => ("✕ Failed", "status-pill status-failed"),
                                                                             StageStatus::Skipped { .. } => ("⊘ Skipped", "status-pill status-skipped"),
                                                                             _ => ("—", "status-pill status-queued"),
