@@ -5,9 +5,9 @@ use leptos::task::spawn_local;
 
 use crate::log_parser::{parse_job_log, StepStatus};
 use crate::models::{
-    extract_repositories, filter_jobs, job_card_svg_url, job_submodule_card_svg_url,
-    score_pill_class, short_branch, short_sha, ClusterNodeView, JobRecord, JobStatus,
-    JobsListResponse, QueueSnapshot, StageStatus,
+    extract_repositories, filter_jobs, is_scrolled_to_bottom, job_card_svg_url,
+    job_submodule_card_svg_url, score_pill_class, short_branch, short_sha, ClusterNodeView,
+    JobRecord, JobStatus, JobsListResponse, QueueSnapshot, StageStatus,
 };
 
 fn default_api_base() -> String {
@@ -75,6 +75,21 @@ fn set_url_job_hash(job_id: Option<&str>) {
         };
         let _ = win.location().set_hash(&target_hash);
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn request_raf<F: FnOnce() + 'static>(f: F) {
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::JsCast;
+    if let Some(win) = web_sys::window() {
+        let cb = Closure::once_into_js(f);
+        let _ = win.request_animation_frame(cb.as_ref().unchecked_ref());
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn request_raf<F: FnOnce() + 'static>(f: F) {
+    f();
 }
 
 async fn fetch_queue_snapshot(api_base: &str) -> Result<QueueSnapshot, String> {
@@ -219,6 +234,44 @@ pub fn App() -> impl IntoView {
     let log_view_mode = RwSignal::new(String::from("raw")); // "raw" or "steps"
     let log_search = RwSignal::new(String::new());
     let log_copied = RwSignal::new(false);
+    let follow_tail = RwSignal::new(true);
+    let last_scroll_top = RwSignal::new(0i32);
+    let log_pre_ref = NodeRef::<leptos::html::Pre>::new();
+
+    let scroll_to_tail = move || {
+        if let Some(el) = log_pre_ref.get() {
+            let sh = el.scroll_height();
+            el.set_scroll_top(sh);
+            last_scroll_top.set(sh);
+        }
+        request_raf(move || {
+            if let Some(el) = log_pre_ref.get() {
+                let sh = el.scroll_height();
+                el.set_scroll_top(sh);
+                last_scroll_top.set(sh);
+            }
+        });
+    };
+
+    let on_log_scroll = move |ev: web_sys::Event| {
+        use wasm_bindgen::JsCast;
+        if let Some(target) = ev.target() {
+            if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                let st = el.scroll_top();
+                let sh = el.scroll_height();
+                let ch = el.client_height();
+                let at_bottom = is_scrolled_to_bottom(sh, ch, st, 40);
+                if at_bottom {
+                    if !follow_tail.get_untracked() {
+                        follow_tail.set(true);
+                    }
+                } else if follow_tail.get_untracked() {
+                    follow_tail.set(false);
+                }
+                last_scroll_top.set(st);
+            }
+        }
+    };
 
     let refresh_all = move || {
         let base = api_base.get_untracked();
@@ -252,7 +305,9 @@ pub fn App() -> impl IntoView {
                     selected_job_record.set(Some(rec));
                 }
                 if let Ok(log_txt) = fetch_job_log_text(&base, &jid).await {
-                    selected_job_log.set(log_txt);
+                    if selected_job_log.get_untracked() != log_txt {
+                        selected_job_log.set(log_txt);
+                    }
                 }
             }
         });
@@ -262,6 +317,8 @@ pub fn App() -> impl IntoView {
         set_url_job_hash(Some(&job_id));
         selected_job_id.set(Some(job_id.clone()));
         log_loading.set(true);
+        follow_tail.set(true);
+        last_scroll_top.set(0);
         let base = api_base.get_untracked();
         // Pre-populate from in-memory list if available
         if let Some(existing) = jobs_list
@@ -288,7 +345,32 @@ pub fn App() -> impl IntoView {
         selected_job_id.set(None);
         selected_job_record.set(None);
         selected_job_log.set(String::new());
+        follow_tail.set(true);
+        last_scroll_top.set(0);
     };
+
+    // Effect for follow-tail mode and scroll position preservation across auto-refreshes
+    Effect::new(move |_| {
+        let _ = selected_job_log.get();
+        let _ = log_search.get();
+        let mode = log_view_mode.get();
+
+        if mode == "raw" {
+            let is_follow = follow_tail.get_untracked();
+            let saved_st = last_scroll_top.get_untracked();
+
+            request_raf(move || {
+                if let Some(el) = log_pre_ref.get() {
+                    if is_follow {
+                        let sh = el.scroll_height();
+                        el.set_scroll_top(sh);
+                    } else {
+                        el.set_scroll_top(saved_st);
+                    }
+                }
+            });
+        }
+    });
 
     // Initial load + 3s auto-refresh timer on wasm32
     Effect::new(move |_| {
@@ -1406,6 +1488,27 @@ pub fn App() -> impl IntoView {
 
                                                             <button
                                                                 type="button"
+                                                                class=move || if follow_tail.get() { "btn btn-active" } else { "btn" }
+                                                                title=move || if follow_tail.get() {
+                                                                    "Follow Tail is active (scrolling to latest log lines). Click to pause."
+                                                                } else {
+                                                                    "Follow Tail is paused. Click to resume following latest output."
+                                                                }
+                                                                on:click=move |_| {
+                                                                    let next = !follow_tail.get_untracked();
+                                                                    follow_tail.set(next);
+                                                                    if next {
+                                                                        scroll_to_tail();
+                                                                    } else if let Some(el) = log_pre_ref.get() {
+                                                                        last_scroll_top.set(el.scroll_top());
+                                                                    }
+                                                                }
+                                                            >
+                                                                {move || if follow_tail.get() { "⬇ Following Tail" } else { "⬇ Follow Tail" }}
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
                                                                 class="btn"
                                                                 on:click=move |_| {
                                                                     if let Some(win) = web_sys::window() {
@@ -1490,21 +1593,48 @@ pub fn App() -> impl IntoView {
                                                             }.into_any()
                                                         } else {
                                                             let line_count = raw_txt.lines().count();
-                                                            let filtered = if filter_q.is_empty() {
-                                                                raw_txt
+                                                            let (filtered, filtered_count) = if filter_q.is_empty() {
+                                                                (raw_txt, line_count)
                                                             } else {
-                                                                raw_txt
+                                                                let lines = raw_txt
                                                                     .lines()
                                                                     .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
-                                                                    .collect::<Vec<_>>()
-                                                                    .join("\n")
+                                                                    .collect::<Vec<_>>();
+                                                                let count = lines.len();
+                                                                (lines.join("\n"), count)
+                                                            };
+                                                            let count_label = if filter_q.is_empty() {
+                                                                format!("{} lines", line_count)
+                                                            } else {
+                                                                format!("{} / {} lines", filtered_count, line_count)
                                                             };
                                                             view! {
                                                                 <div>
-                                                                    <div style="display: flex; justify-content: flex-end; padding: 4px 16px; font-size: 11px; color: #8b949e;">
-                                                                        {format!("{} lines", line_count)}
+                                                                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 14px; font-size: 11px; color: #8b949e; background: #161b22; border-top-left-radius: 6px; border-top-right-radius: 6px; border: 1px solid #30363d; border-bottom: none;">
+                                                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                                                            <span style=move || if follow_tail.get() { "color: #3fb950; font-weight: 600;" } else { "color: #8b949e; font-weight: 500;" }>
+                                                                                {move || if follow_tail.get() { "● Follow Tail Active" } else { "○ Follow Tail Paused" }}
+                                                                            </span>
+                                                                            <span style="color: #484f58;">"|"</span>
+                                                                            <button
+                                                                                type="button"
+                                                                                style="background: none; border: none; padding: 0; color: #58a6ff; font-size: 11px; cursor: pointer; text-decoration: underline;"
+                                                                                on:click=move |_| {
+                                                                                    follow_tail.set(true);
+                                                                                    scroll_to_tail();
+                                                                                }
+                                                                            >
+                                                                                "Jump to tail"
+                                                                            </button>
+                                                                        </div>
+                                                                        <span>{count_label}</span>
                                                                     </div>
-                                                                    <pre class="log-pre" style="max-height: 650px; overflow-y: auto; background: #0d1117; color: #c9d1d9; padding: 16px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-all;">{filtered}</pre>
+                                                                    <pre
+                                                                        node_ref=log_pre_ref
+                                                                        on:scroll=on_log_scroll
+                                                                        class="log-pre"
+                                                                        style="max-height: 650px; overflow-y: auto; background: #0d1117; color: #c9d1d9; padding: 16px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; border-top-left-radius: 0; border-top-right-radius: 0; border: 1px solid #30363d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-all; margin-top: 0;"
+                                                                    >{filtered}</pre>
                                                                 </div>
                                                             }.into_any()
                                                         }
