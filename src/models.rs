@@ -298,16 +298,42 @@ pub fn score_pill_class(score: u32) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 pub fn card_svg_url(api_base: &str, repo_name: &str, ref_name: &str) -> String {
     let base = api_base.trim_end_matches('/');
     let branch = short_branch(ref_name);
-    if branch.is_empty() || branch.contains('/') {
+    if branch.is_empty() {
         format!("{}/cards/{}/card.svg", base, repo_name)
+    } else if branch.contains('/') {
+        format!("{}/cards/{}/card.svg?branch={}", base, repo_name, branch)
     } else {
         format!("{}/cards/{}/{}/card.svg", base, repo_name, branch)
     }
 }
 
+pub fn job_card_svg_url(api_base: &str, job_id: &str, updated_ts: i64) -> String {
+    let base = api_base.trim_end_matches('/');
+    format!("{}/api/jobs/{}/card.svg?t={}", base, job_id, updated_ts)
+}
+
+pub fn job_submodule_card_svg_url(
+    api_base: &str,
+    job_id: &str,
+    submodule_name: &str,
+    updated_ts: i64,
+) -> String {
+    let base = api_base.trim_end_matches('/');
+    let sub_short = submodule_name
+        .rsplit_once('/')
+        .map(|(_, s)| s)
+        .unwrap_or(submodule_name);
+    format!(
+        "{}/api/jobs/{}/submodules/{}/card.svg?t={}",
+        base, job_id, sub_short, updated_ts
+    )
+}
+
+#[allow(dead_code)]
 pub fn submodule_card_svg_url(parent_repo: &str, submodule_name: &str, api_base: &str) -> String {
     let base = api_base.trim_end_matches('/');
     let owner = parent_repo
@@ -456,6 +482,22 @@ mod tests {
         assert_eq!(
             card_svg_url("", "LMA1980/model-runner", "refs/heads/main"),
             "/cards/LMA1980/model-runner/main/card.svg"
+        );
+        assert_eq!(
+            card_svg_url(
+                "",
+                "LMA1980/ActionRunner-web",
+                "feat/first-view-host-attribution"
+            ),
+            "/cards/LMA1980/ActionRunner-web/card.svg?branch=feat/first-view-host-attribution"
+        );
+        assert_eq!(
+            job_card_svg_url("", "job-1792858126-9ca1c51a-2", 1792858557),
+            "/api/jobs/job-1792858126-9ca1c51a-2/card.svg?t=1792858557"
+        );
+        assert_eq!(
+            job_submodule_card_svg_url("", "job-1792858126-9ca1c51a-2", "code/core", 1792858557),
+            "/api/jobs/job-1792858126-9ca1c51a-2/submodules/core/card.svg?t=1792858557"
         );
         assert_eq!(
             submodule_card_svg_url("LMA1980/model-runner", "k3-core", ""),

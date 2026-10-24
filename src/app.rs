@@ -5,9 +5,9 @@ use leptos::task::spawn_local;
 
 use crate::log_parser::{parse_job_log, StepStatus};
 use crate::models::{
-    card_svg_url, extract_repositories, filter_jobs, score_pill_class, short_branch, short_sha,
-    submodule_card_svg_url, ClusterNodeView, JobRecord, JobStatus, JobsListResponse, QueueSnapshot,
-    StageStatus,
+    extract_repositories, filter_jobs, job_card_svg_url, job_submodule_card_svg_url,
+    score_pill_class, short_branch, short_sha, ClusterNodeView, JobRecord, JobStatus,
+    JobsListResponse, QueueSnapshot, StageStatus,
 };
 
 fn default_api_base() -> String {
@@ -1165,7 +1165,7 @@ pub fn App() -> impl IntoView {
                                         let queued_str = rec.job.queued_at.format("%Y-%m-%d %H:%M:%S UTC").to_string();
                                         let status_cls = rec.status.css_class();
                                         let status_lbl = rec.status.badge_label();
-                                        let card_url = card_svg_url(&base, &rec.job.repo_name, &rec.job.ref_name);
+                                        let card_url = job_card_svg_url(&base, &rec.job.id, rec.updated_at.timestamp());
 
                                         let callout = match &rec.status {
                                             JobStatus::Failed { error } => Some(("alert-error", format!("Failure Reason: {}", error))),
@@ -1263,8 +1263,9 @@ pub fn App() -> impl IntoView {
 
                                                 // Submodules Drill-Down Section (supports 3+ submodules dynamically)
                                                 {(!submodules.is_empty()).then(|| {
-                                                    let parent_repo = repo.clone();
                                                     let base_for_subs = base.clone();
+                                                    let job_id_for_subs = rec.job.id.clone();
+                                                    let updated_ts_for_subs = rec.updated_at.timestamp();
                                                     view! {
                                                         <section class="panel">
                                                             <div class="panel-header">
@@ -1276,7 +1277,7 @@ pub fn App() -> impl IntoView {
                                                                 {submodules.into_iter().map(|sub| {
                                                                     let s_cls = score_pill_class(sub.quality_score);
                                                                     let s_txt = format!("{}% {}", sub.quality_score, sub.letter_grade);
-                                                                    let sub_card = submodule_card_svg_url(&parent_repo, &sub.name, &base_for_subs);
+                                                                    let sub_card = job_submodule_card_svg_url(&base_for_subs, &job_id_for_subs, &sub.name, updated_ts_for_subs);
                                                                     let cov_str = sub.coverage_pct.map(|c| format!("{:.1}%", c)).unwrap_or_else(|| "—".to_string());
                                                                     let bench_str = sub.benchmark_summary.clone().unwrap_or_else(|| "—".to_string());
                                                                     view! {
