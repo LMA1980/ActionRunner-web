@@ -405,6 +405,19 @@ pub fn filter_jobs(
         .collect()
 }
 
+/// Determines if a scrollable container is currently positioned at or near the tail (bottom).
+/// Returns true if the distance from the bottom is within `threshold` pixels, or if the content
+/// fits within the container without overflowing.
+pub fn is_scrolled_to_bottom(
+    scroll_height: i32,
+    client_height: i32,
+    scroll_top: i32,
+    threshold: i32,
+) -> bool {
+    let distance_to_bottom = (scroll_height - client_height) - scroll_top;
+    distance_to_bottom <= threshold
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -531,5 +544,23 @@ mod tests {
         stage.assigned_node = Some("pey-wail-deu".to_string());
         assert_eq!(stage.compact_node_display().0, "🔬 pey-wail-deu");
         assert_eq!(stage.compact_node_display().1, "node-pill node-k3");
+    }
+
+    #[test]
+    fn test_is_scrolled_to_bottom() {
+        // At exact bottom: (2000 - 650) - 1350 = 0 <= 40
+        assert!(is_scrolled_to_bottom(2000, 650, 1350, 40));
+        // Within 40px threshold (20px from bottom): distance = 20 <= 40
+        assert!(is_scrolled_to_bottom(2000, 650, 1330, 40));
+        // Exactly at 40px threshold: distance = 40 <= 40
+        assert!(is_scrolled_to_bottom(2000, 650, 1310, 40));
+        // 50px away from bottom (scrolled up): distance = 50 > 40
+        assert!(!is_scrolled_to_bottom(2000, 650, 1300, 40));
+        // Scrolled all the way to top: distance = 1350 > 40
+        assert!(!is_scrolled_to_bottom(2000, 650, 0, 40));
+        // macOS / iOS rubber-banding overshoot: distance = -10 <= 40
+        assert!(is_scrolled_to_bottom(2000, 650, 1360, 40));
+        // Content shorter than container (fits entirely on screen): distance = -250 <= 40
+        assert!(is_scrolled_to_bottom(400, 650, 0, 40));
     }
 }

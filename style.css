@@ -135,6 +135,7 @@ body {
 .btn-active {
   border-color: var(--accent-blue);
   color: var(--accent-blue);
+  background-color: rgba(88, 166, 255, 0.1);
 }
 
 .btn-primary {
