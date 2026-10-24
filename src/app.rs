@@ -450,14 +450,19 @@ pub fn App() -> impl IntoView {
                                 if let Some(txt) = ev.data().as_string() {
                                     if let Ok(snap) = serde_json::from_str::<QueueSnapshot>(&txt) {
                                         queue_snap.set(Some(snap));
-                                        last_updated.set(Utc::now().format("%H:%M:%S UTC (Live)").to_string());
+                                        last_updated.set(
+                                            Utc::now().format("%H:%M:%S UTC (Live)").to_string(),
+                                        );
                                         error_banner.set(None);
                                         push_connected.set(true);
                                     }
                                 }
                             }) as Box<dyn FnMut(_)>)
                         };
-                        let _ = es.add_event_listener_with_callback("queue", on_queue.as_ref().unchecked_ref());
+                        let _ = es.add_event_listener_with_callback(
+                            "queue",
+                            on_queue.as_ref().unchecked_ref(),
+                        );
                         on_queue.forget();
 
                         let on_jobs = {
@@ -469,30 +474,44 @@ pub fn App() -> impl IntoView {
                                     }
                                     if let Ok(wrapper) = serde_json::from_str::<JobsWrapper>(&txt) {
                                         jobs_list.set(wrapper.jobs);
-                                        last_updated.set(Utc::now().format("%H:%M:%S UTC (Live)").to_string());
+                                        last_updated.set(
+                                            Utc::now().format("%H:%M:%S UTC (Live)").to_string(),
+                                        );
                                         push_connected.set(true);
-                                    } else if let Ok(list) = serde_json::from_str::<Vec<JobRecord>>(&txt) {
+                                    } else if let Ok(list) =
+                                        serde_json::from_str::<Vec<JobRecord>>(&txt)
+                                    {
                                         jobs_list.set(list);
-                                        last_updated.set(Utc::now().format("%H:%M:%S UTC (Live)").to_string());
+                                        last_updated.set(
+                                            Utc::now().format("%H:%M:%S UTC (Live)").to_string(),
+                                        );
                                         push_connected.set(true);
                                     }
                                 }
                             }) as Box<dyn FnMut(_)>)
                         };
-                        let _ = es.add_event_listener_with_callback("jobs", on_jobs.as_ref().unchecked_ref());
+                        let _ = es.add_event_listener_with_callback(
+                            "jobs",
+                            on_jobs.as_ref().unchecked_ref(),
+                        );
                         on_jobs.forget();
 
                         let on_cluster = {
                             Closure::wrap(Box::new(move |ev: web_sys::MessageEvent| {
                                 if let Some(txt) = ev.data().as_string() {
-                                    if let Ok(nodes) = serde_json::from_str::<Vec<ClusterNodeView>>(&txt) {
+                                    if let Ok(nodes) =
+                                        serde_json::from_str::<Vec<ClusterNodeView>>(&txt)
+                                    {
                                         cluster_nodes.set(nodes);
                                         push_connected.set(true);
                                     }
                                 }
                             }) as Box<dyn FnMut(_)>)
                         };
-                        let _ = es.add_event_listener_with_callback("cluster", on_cluster.as_ref().unchecked_ref());
+                        let _ = es.add_event_listener_with_callback(
+                            "cluster",
+                            on_cluster.as_ref().unchecked_ref(),
+                        );
                         on_cluster.forget();
 
                         *active_es.borrow_mut() = Some(es);
@@ -529,13 +548,18 @@ pub fn App() -> impl IntoView {
                                 if let Some(txt) = ev.data().as_string() {
                                     if let Ok(rec) = serde_json::from_str::<JobRecord>(&txt) {
                                         selected_job_record.set(Some(rec));
-                                        last_updated.set(Utc::now().format("%H:%M:%S UTC (Live)").to_string());
+                                        last_updated.set(
+                                            Utc::now().format("%H:%M:%S UTC (Live)").to_string(),
+                                        );
                                         push_connected.set(true);
                                     }
                                 }
                             }) as Box<dyn FnMut(_)>)
                         };
-                        let _ = es.add_event_listener_with_callback("job", on_job.as_ref().unchecked_ref());
+                        let _ = es.add_event_listener_with_callback(
+                            "job",
+                            on_job.as_ref().unchecked_ref(),
+                        );
                         on_job.forget();
 
                         let on_log_init = {
@@ -550,7 +574,10 @@ pub fn App() -> impl IntoView {
                                 }
                             }) as Box<dyn FnMut(_)>)
                         };
-                        let _ = es.add_event_listener_with_callback("log_init", on_log_init.as_ref().unchecked_ref());
+                        let _ = es.add_event_listener_with_callback(
+                            "log_init",
+                            on_log_init.as_ref().unchecked_ref(),
+                        );
                         on_log_init.forget();
 
                         let on_log_chunk = {
@@ -564,7 +591,10 @@ pub fn App() -> impl IntoView {
                                 }
                             }) as Box<dyn FnMut(_)>)
                         };
-                        let _ = es.add_event_listener_with_callback("log_chunk", on_log_chunk.as_ref().unchecked_ref());
+                        let _ = es.add_event_listener_with_callback(
+                            "log_chunk",
+                            on_log_chunk.as_ref().unchecked_ref(),
+                        );
                         on_log_chunk.forget();
 
                         *active_es.borrow_mut() = Some(es);
