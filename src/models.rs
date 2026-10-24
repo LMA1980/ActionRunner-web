@@ -64,6 +64,45 @@ pub struct JobMetrics {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", content = "details")]
+pub enum StageStatus {
+    Pending,
+    Assigned { node_id: String, started_at: DateTime<Utc> },
+    Running { node_id: String, started_at: DateTime<Utc> },
+    Completed { duration_secs: u64, exit_code: i32 },
+    Failed { error: String },
+    Skipped { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StageRecord {
+    pub id: String,
+    pub name: String,
+    pub tags: Vec<String>,
+    pub threads: u32,
+    pub toolchain: Option<String>,
+    pub depends_on: Vec<String>,
+    pub status: StageStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct ClusterNodeView {
+    pub node_id: String,
+    pub arch: String,
+    pub tags: Vec<String>,
+    pub max_slots: u32,
+    pub active_slots: u32,
+    pub ram_total_mb: u64,
+    pub ram_used_mb: u64,
+    pub cpu_load_pct: f32,
+    pub btrfs_enabled: bool,
+    pub toolchains: Vec<String>,
+    pub last_seen_secs_ago: u64,
+    pub is_online: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JobRecord {
     pub job: Job,
     pub status: JobStatus,
@@ -75,6 +114,8 @@ pub struct JobRecord {
     pub queue_position: Option<usize>,
     #[serde(default)]
     pub elapsed_secs: Option<u64>,
+    #[serde(default)]
+    pub stages: Vec<StageRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
