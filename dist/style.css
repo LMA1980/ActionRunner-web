@@ -375,6 +375,110 @@ body {
   font-size: 12px;
 }
 
+/* Execution Host & Cluster Node Badges */
+.node-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.node-n100 {
+  background-color: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.node-xeon {
+  background-color: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+}
+
+.node-k3 {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.node-other {
+  background-color: rgba(139, 148, 158, 0.15);
+  color: #c9d1d9;
+  border: 1px solid rgba(139, 148, 158, 0.35);
+}
+
+.node-pending {
+  background-color: rgba(139, 148, 158, 0.08);
+  color: #8b949e;
+  border: 1px dashed rgba(139, 148, 158, 0.25);
+}
+
+/* Stage Host Badges */
+.stage-host-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  transition: transform 0.1s ease;
+}
+
+.stage-host-badge:hover {
+  filter: brightness(1.15);
+}
+
+.badge-stage-name {
+  font-weight: 700;
+}
+
+.badge-host-sep {
+  opacity: 0.4;
+  font-size: 9px;
+}
+
+.badge-host-name {
+  font-weight: 600;
+}
+
+.badge-stage-dur {
+  font-size: 10px;
+  opacity: 0.9;
+  margin-left: 2px;
+}
+
+.job-stages-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.job-stages-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.spotlight-stages-strip {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .drill-link {
   font-size: 12px;
   font-weight: 600;
