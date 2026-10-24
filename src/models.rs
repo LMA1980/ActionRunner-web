@@ -414,7 +414,11 @@ pub fn is_scrolled_to_bottom(
     scroll_top: i32,
     threshold: i32,
 ) -> bool {
-    let distance_to_bottom = (scroll_height - client_height) - scroll_top;
+    let max_scroll = scroll_height - client_height;
+    if max_scroll <= 0 {
+        return true;
+    }
+    let distance_to_bottom = max_scroll - scroll_top;
     distance_to_bottom <= threshold
 }
 

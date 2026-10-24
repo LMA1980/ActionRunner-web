@@ -19,6 +19,7 @@ export const wasm_bindgen_1081955bf4b21243___convert__closures_____invoke___js_s
 export const wasm_bindgen_1081955bf4b21243___convert__closures_____invoke___wasm_bindgen_1081955bf4b21243___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_1081955bf4b21243___JsError___true_: (a: number, b: number, c: any) => [number, number];
 export const wasm_bindgen_1081955bf4b21243___convert__closures_____invoke___wasm_bindgen_1081955bf4b21243___JsValue______true_: (a: number, b: number, c: any) => void;
 export const wasm_bindgen_1081955bf4b21243___convert__closures_____invoke___wasm_bindgen_1081955bf4b21243___JsValue______true__13: (a: number, b: number, c: any) => void;
+export const wasm_bindgen_1081955bf4b21243___convert__closures_____invoke___web_sys_6fe5b1aad97417eb___features__gen_CloseEvent__CloseEvent______true_: (a: number, b: number, c: any) => void;
 export const wasm_bindgen_1081955bf4b21243___convert__closures_____invoke_______true_: (a: number, b: number) => void;
 export const __wbindgen_malloc: (a: number, b: number) => number;
 export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

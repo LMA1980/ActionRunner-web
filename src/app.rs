@@ -217,8 +217,10 @@ pub fn App() -> impl IntoView {
     let jobs_list = RwSignal::new(Vec::<JobRecord>::new());
     let cluster_nodes = RwSignal::new(Vec::<ClusterNodeView>::new());
     let error_banner = RwSignal::new(None::<String>);
-    let last_updated = RwSignal::new(String::from("Loading..."));
+    let last_updated = RwSignal::new(String::from("Connecting..."));
     let auto_refresh = RwSignal::new(true);
+    let push_connected = RwSignal::new(false);
+    let push_status = RwSignal::new(String::from("Connecting..."));
 
     // Filter signals for Queue & Job Explorer
     let repo_filter = RwSignal::new(String::from("all"));
@@ -236,9 +238,11 @@ pub fn App() -> impl IntoView {
     let log_copied = RwSignal::new(false);
     let follow_tail = RwSignal::new(true);
     let last_scroll_top = RwSignal::new(0i32);
+    let is_programmatic_scroll = StoredValue::new(false);
     let log_pre_ref = NodeRef::<leptos::html::Pre>::new();
 
     let scroll_to_tail = move || {
+        is_programmatic_scroll.set_value(true);
         if let Some(el) = log_pre_ref.get() {
             let sh = el.scroll_height();
             el.set_scroll_top(sh);
@@ -250,17 +254,23 @@ pub fn App() -> impl IntoView {
                 el.set_scroll_top(sh);
                 last_scroll_top.set(sh);
             }
+            request_raf(move || {
+                is_programmatic_scroll.set_value(false);
+            });
         });
     };
 
     let on_log_scroll = move |ev: web_sys::Event| {
         use wasm_bindgen::JsCast;
+        if is_programmatic_scroll.get_value() {
+            return;
+        }
         if let Some(target) = ev.target() {
             if let Ok(el) = target.dyn_into::<web_sys::Element>() {
                 let st = el.scroll_top();
                 let sh = el.scroll_height();
                 let ch = el.client_height();
-                let at_bottom = is_scrolled_to_bottom(sh, ch, st, 40);
+                let at_bottom = is_scrolled_to_bottom(sh, ch, st, 60);
                 if at_bottom {
                     if !follow_tail.get_untracked() {
                         follow_tail.set(true);
@@ -333,7 +343,10 @@ pub fn App() -> impl IntoView {
                 selected_job_record.set(Some(rec));
             }
             match fetch_job_log_text(&base, &job_id).await {
-                Ok(txt) => selected_job_log.set(txt),
+                Ok(txt) => {
+                    selected_job_log.set(txt);
+                    scroll_to_tail();
+                }
                 Err(e) => selected_job_log.set(format!("[ActionRunner-web] {}", e)),
             }
             log_loading.set(false);
@@ -349,7 +362,7 @@ pub fn App() -> impl IntoView {
         last_scroll_top.set(0);
     };
 
-    // Effect for follow-tail mode and scroll position preservation across auto-refreshes
+    // Effect for follow-tail mode and scroll position preservation across log updates
     Effect::new(move |_| {
         let _ = selected_job_log.get();
         let _ = log_search.get();
@@ -372,7 +385,7 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    // Initial load + 3s auto-refresh timer on wasm32
+    // Initial fetch on mount
     Effect::new(move |_| {
         refresh_all();
         if let Some(init_id) = selected_job_id.get_untracked() {
@@ -380,22 +393,215 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    // Reactive Service Push SSE connection based on active client view (Dashboard vs Job Drilldown)
     #[cfg(target_arch = "wasm32")]
     {
+        use std::cell::RefCell;
+        use std::rc::Rc;
         use wasm_bindgen::closure::Closure;
         use wasm_bindgen::JsCast;
-        if let Some(win) = web_sys::window() {
-            let cb = Closure::wrap(Box::new(move || {
-                if auto_refresh.get_untracked() {
-                    refresh_all();
+
+        let active_es: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
+
+        Effect::new(move |_| {
+            let base = api_base.get();
+            let active_job = selected_job_id.get();
+            let enabled = auto_refresh.get();
+
+            // Always close existing EventSource before establishing a new one
+            if let Some(old_es) = active_es.borrow_mut().take() {
+                old_es.close();
+                push_connected.set(false);
+            }
+
+            if !enabled {
+                push_status.set("Live Push: Paused".to_string());
+                return;
+            }
+
+            match active_job {
+                None => {
+                    // 1. Dashboard View: Push events for Queue, Jobs list, and Cluster Fabric nodes
+                    let sse_url = format!("{}/api/events?view=dashboard", base);
+                    if let Ok(es) = web_sys::EventSource::new(&sse_url) {
+                        push_status.set("Connecting Live Push (Dashboard)...".to_string());
+
+                        let on_open = {
+                            Closure::wrap(Box::new(move |_ev: web_sys::Event| {
+                                push_connected.set(true);
+                                push_status.set("● Live Push: Connected (Dashboard)".to_string());
+                                error_banner.set(None);
+                            }) as Box<dyn FnMut(_)>)
+                        };
+                        es.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+                        on_open.forget();
+
+                        let on_error = {
+                            Closure::wrap(Box::new(move |_ev: web_sys::Event| {
+                                push_connected.set(false);
+                                push_status.set("⟳ Live Push: Reconnecting...".to_string());
+                            }) as Box<dyn FnMut(_)>)
+                        };
+                        es.set_onerror(Some(on_error.as_ref().unchecked_ref()));
+                        on_error.forget();
+
+                        let on_queue = {
+                            Closure::wrap(Box::new(move |ev: web_sys::MessageEvent| {
+                                if let Some(txt) = ev.data().as_string() {
+                                    if let Ok(snap) = serde_json::from_str::<QueueSnapshot>(&txt) {
+                                        queue_snap.set(Some(snap));
+                                        last_updated.set(
+                                            Utc::now().format("%H:%M:%S UTC (Live)").to_string(),
+                                        );
+                                        error_banner.set(None);
+                                        push_connected.set(true);
+                                    }
+                                }
+                            }) as Box<dyn FnMut(_)>)
+                        };
+                        let _ = es.add_event_listener_with_callback(
+                            "queue",
+                            on_queue.as_ref().unchecked_ref(),
+                        );
+                        on_queue.forget();
+
+                        let on_jobs = {
+                            Closure::wrap(Box::new(move |ev: web_sys::MessageEvent| {
+                                if let Some(txt) = ev.data().as_string() {
+                                    #[derive(serde::Deserialize)]
+                                    struct JobsWrapper {
+                                        jobs: Vec<JobRecord>,
+                                    }
+                                    if let Ok(wrapper) = serde_json::from_str::<JobsWrapper>(&txt) {
+                                        jobs_list.set(wrapper.jobs);
+                                        last_updated.set(
+                                            Utc::now().format("%H:%M:%S UTC (Live)").to_string(),
+                                        );
+                                        push_connected.set(true);
+                                    } else if let Ok(list) =
+                                        serde_json::from_str::<Vec<JobRecord>>(&txt)
+                                    {
+                                        jobs_list.set(list);
+                                        last_updated.set(
+                                            Utc::now().format("%H:%M:%S UTC (Live)").to_string(),
+                                        );
+                                        push_connected.set(true);
+                                    }
+                                }
+                            }) as Box<dyn FnMut(_)>)
+                        };
+                        let _ = es.add_event_listener_with_callback(
+                            "jobs",
+                            on_jobs.as_ref().unchecked_ref(),
+                        );
+                        on_jobs.forget();
+
+                        let on_cluster = {
+                            Closure::wrap(Box::new(move |ev: web_sys::MessageEvent| {
+                                if let Some(txt) = ev.data().as_string() {
+                                    if let Ok(nodes) =
+                                        serde_json::from_str::<Vec<ClusterNodeView>>(&txt)
+                                    {
+                                        cluster_nodes.set(nodes);
+                                        push_connected.set(true);
+                                    }
+                                }
+                            }) as Box<dyn FnMut(_)>)
+                        };
+                        let _ = es.add_event_listener_with_callback(
+                            "cluster",
+                            on_cluster.as_ref().unchecked_ref(),
+                        );
+                        on_cluster.forget();
+
+                        *active_es.borrow_mut() = Some(es);
+                    }
                 }
-            }) as Box<dyn FnMut()>);
-            let _ = win.set_interval_with_callback_and_timeout_and_arguments_0(
-                cb.as_ref().unchecked_ref(),
-                3000,
-            );
-            cb.forget();
-        }
+                Some(job_id) => {
+                    // 2. Job Drill-Down View: Push events for Job metadata and real-time execution log stream
+                    let sse_url = format!("{}/api/jobs/{}/events", base, job_id);
+                    if let Ok(es) = web_sys::EventSource::new(&sse_url) {
+                        push_status.set(format!("Connecting Live Push (Job {})...", job_id));
+
+                        let on_open = {
+                            let jid = job_id.clone();
+                            Closure::wrap(Box::new(move |_ev: web_sys::Event| {
+                                push_connected.set(true);
+                                push_status.set(format!("● Live Push: Connected ({})", jid));
+                                error_banner.set(None);
+                            }) as Box<dyn FnMut(_)>)
+                        };
+                        es.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+                        on_open.forget();
+
+                        let on_error = {
+                            Closure::wrap(Box::new(move |_ev: web_sys::Event| {
+                                push_connected.set(false);
+                                push_status.set("⟳ Live Push: Reconnecting...".to_string());
+                            }) as Box<dyn FnMut(_)>)
+                        };
+                        es.set_onerror(Some(on_error.as_ref().unchecked_ref()));
+                        on_error.forget();
+
+                        let on_job = {
+                            Closure::wrap(Box::new(move |ev: web_sys::MessageEvent| {
+                                if let Some(txt) = ev.data().as_string() {
+                                    if let Ok(rec) = serde_json::from_str::<JobRecord>(&txt) {
+                                        selected_job_record.set(Some(rec));
+                                        last_updated.set(
+                                            Utc::now().format("%H:%M:%S UTC (Live)").to_string(),
+                                        );
+                                        push_connected.set(true);
+                                    }
+                                }
+                            }) as Box<dyn FnMut(_)>)
+                        };
+                        let _ = es.add_event_listener_with_callback(
+                            "job",
+                            on_job.as_ref().unchecked_ref(),
+                        );
+                        on_job.forget();
+
+                        let on_log_init = {
+                            Closure::wrap(Box::new(move |ev: web_sys::MessageEvent| {
+                                if let Some(raw) = ev.data().as_string() {
+                                    let txt: String = serde_json::from_str(&raw).unwrap_or(raw);
+                                    selected_job_log.set(txt);
+                                    log_loading.set(false);
+                                    if follow_tail.get_untracked() {
+                                        scroll_to_tail();
+                                    }
+                                }
+                            }) as Box<dyn FnMut(_)>)
+                        };
+                        let _ = es.add_event_listener_with_callback(
+                            "log_init",
+                            on_log_init.as_ref().unchecked_ref(),
+                        );
+                        on_log_init.forget();
+
+                        let on_log_chunk = {
+                            Closure::wrap(Box::new(move |ev: web_sys::MessageEvent| {
+                                if let Some(raw) = ev.data().as_string() {
+                                    let chunk: String = serde_json::from_str(&raw).unwrap_or(raw);
+                                    selected_job_log.update(|log| log.push_str(&chunk));
+                                    if follow_tail.get_untracked() {
+                                        scroll_to_tail();
+                                    }
+                                }
+                            }) as Box<dyn FnMut(_)>)
+                        };
+                        let _ = es.add_event_listener_with_callback(
+                            "log_chunk",
+                            on_log_chunk.as_ref().unchecked_ref(),
+                        );
+                        on_log_chunk.forget();
+
+                        *active_es.borrow_mut() = Some(es);
+                    }
+                }
+            }
+        });
     }
 
     let runner_busy = move || {
@@ -451,12 +657,25 @@ pub fn App() -> impl IntoView {
                     <button
                         class=move || if auto_refresh.get() { "btn btn-active" } else { "btn" }
                         on:click=move |_| auto_refresh.update(|v| *v = !*v)
+                        title=move || push_status.get()
                     >
                         <span class="btn-text-full">
-                            {move || if auto_refresh.get() { "⟳ Auto-Refresh: ON (3s)" } else { "⏸ Auto-Refresh: PAUSED" }}
+                            {move || if auto_refresh.get() {
+                                if push_connected.get() {
+                                    "● Live Push: ON"
+                                } else {
+                                    "⟳ Live Push: Connecting..."
+                                }
+                            } else {
+                                "⏸ Live Push: PAUSED"
+                            }}
                         </span>
                         <span class="btn-text-short">
-                            {move || if auto_refresh.get() { "⟳ Auto: ON" } else { "⏸ Auto: OFF" }}
+                            {move || if auto_refresh.get() {
+                                if push_connected.get() { "● Live" } else { "⟳ Live" }
+                            } else {
+                                "⏸ Off"
+                            }}
                         </span>
                     </button>
 
@@ -1562,26 +1781,35 @@ pub fn App() -> impl IntoView {
                                                         </div>
                                                     </div>
 
-                                                    {move || {
-                                                        let raw_txt = selected_job_log.get();
-                                                        if log_loading.get() && raw_txt.is_empty() {
-                                                            return view! {
-                                                                <div class="queue-empty-list">"Loading execution log..."</div>
-                                                            }.into_any();
-                                                        }
+                                                    // 1. Steps Accordion View
+                                                    <div style=move || if log_view_mode.get() == "steps" { "display: block;" } else { "display: none;" }>
+                                                        {move || {
+                                                            let raw_txt = selected_job_log.get();
+                                                            if log_loading.get() && raw_txt.is_empty() {
+                                                                return view! {
+                                                                    <div class="queue-empty-list">"Loading execution log..."</div>
+                                                                }.into_any();
+                                                            }
 
-                                                        if raw_txt.is_empty() {
-                                                            return view! {
-                                                                <div class="queue-empty-list">
-                                                                    "No execution logs recorded yet for this job."
-                                                                </div>
-                                                            }.into_any();
-                                                        }
+                                                            if raw_txt.is_empty() {
+                                                                return view! {
+                                                                    <div class="queue-empty-list">
+                                                                        "No execution logs recorded yet for this job."
+                                                                    </div>
+                                                                }.into_any();
+                                                            }
 
-                                                        let filter_q = log_search.get().trim().to_ascii_lowercase();
-                                                        let parsed_log = parse_job_log(&raw_txt);
+                                                            let filter_q = log_search.get().trim().to_ascii_lowercase();
+                                                            let parsed_log = parse_job_log(&raw_txt);
 
-                                                        if log_view_mode.get() == "steps" && !parsed_log.steps.is_empty() {
+                                                            if parsed_log.steps.is_empty() {
+                                                                return view! {
+                                                                    <div class="queue-empty-list">
+                                                                        "No discrete steps detected; switch to Raw Log mode to view full execution stream."
+                                                                    </div>
+                                                                }.into_any();
+                                                            }
+
                                                             let steps = parsed_log.steps.clone();
                                                             let pre = parsed_log.pre_step_output.clone();
                                                             let post = parsed_log.footer_output.clone();
@@ -1629,54 +1857,72 @@ pub fn App() -> impl IntoView {
                                                                     })}
                                                                 </div>
                                                             }.into_any()
-                                                        } else {
-                                                            let line_count = raw_txt.lines().count();
-                                                            let (filtered, filtered_count) = if filter_q.is_empty() {
-                                                                (raw_txt, line_count)
-                                                            } else {
-                                                                let lines = raw_txt
-                                                                    .lines()
-                                                                    .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
-                                                                    .collect::<Vec<_>>();
-                                                                let count = lines.len();
-                                                                (lines.join("\n"), count)
-                                                            };
-                                                            let count_label = if filter_q.is_empty() {
-                                                                format!("{} lines", line_count)
-                                                            } else {
-                                                                format!("{} / {} lines", filtered_count, line_count)
-                                                            };
-                                                            view! {
-                                                                <div>
-                                                                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 14px; font-size: 11px; color: #8b949e; background: #161b22; border-top-left-radius: 6px; border-top-right-radius: 6px; border: 1px solid #30363d; border-bottom: none;">
-                                                                        <div style="display: flex; align-items: center; gap: 8px;">
-                                                                            <span style=move || if follow_tail.get() { "color: #3fb950; font-weight: 600;" } else { "color: #8b949e; font-weight: 500;" }>
-                                                                                {move || if follow_tail.get() { "● Follow Tail Active" } else { "○ Follow Tail Paused" }}
-                                                                            </span>
-                                                                            <span style="color: #484f58;">"|"</span>
-                                                                            <button
-                                                                                type="button"
-                                                                                style="background: none; border: none; padding: 0; color: #58a6ff; font-size: 11px; cursor: pointer; text-decoration: underline;"
-                                                                                on:click=move |_| {
-                                                                                    follow_tail.set(true);
-                                                                                    scroll_to_tail();
-                                                                                }
-                                                                            >
-                                                                                "Jump to tail"
-                                                                            </button>
-                                                                        </div>
-                                                                        <span>{count_label}</span>
-                                                                    </div>
-                                                                    <pre
-                                                                        node_ref=log_pre_ref
-                                                                        on:scroll=on_log_scroll
-                                                                        class="log-pre"
-                                                                        style="max-height: 650px; overflow-y: auto; background: #0d1117; color: #c9d1d9; padding: 16px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; border-top-left-radius: 0; border-top-right-radius: 0; border: 1px solid #30363d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-all; margin-top: 0;"
-                                                                    >{filtered}</pre>
-                                                                </div>
-                                                            }.into_any()
-                                                        }
-                                                    }}
+                                                        }}
+                                                    </div>
+
+                                                    // 2. Continuous Raw Log View with Stable DOM Pre Node
+                                                    <div style=move || if log_view_mode.get() == "raw" { "display: block;" } else { "display: none;" }>
+                                                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 14px; font-size: 11px; color: #8b949e; background: #161b22; border-top-left-radius: 6px; border-top-right-radius: 6px; border: 1px solid #30363d; border-bottom: none;">
+                                                            <div style="display: flex; align-items: center; gap: 8px;">
+                                                                <span style=move || if follow_tail.get() { "color: #3fb950; font-weight: 600;" } else { "color: #8b949e; font-weight: 500;" }>
+                                                                    {move || if follow_tail.get() { "● Follow Tail Active" } else { "○ Follow Tail Paused" }}
+                                                                </span>
+                                                                <span style="color: #484f58;">"|"</span>
+                                                                <button
+                                                                    type="button"
+                                                                    style="background: none; border: none; padding: 0; color: #58a6ff; font-size: 11px; cursor: pointer; text-decoration: underline;"
+                                                                    on:click=move |_| {
+                                                                        follow_tail.set(true);
+                                                                        scroll_to_tail();
+                                                                    }
+                                                                >
+                                                                    "Jump to tail"
+                                                                </button>
+                                                            </div>
+                                                            <span>
+                                                                {move || {
+                                                                    let raw_txt = selected_job_log.get();
+                                                                    let line_count = raw_txt.lines().count();
+                                                                    let filter_q = log_search.get().trim().to_ascii_lowercase();
+                                                                    if filter_q.is_empty() {
+                                                                        format!("{} lines", line_count)
+                                                                    } else {
+                                                                        let filtered_count = raw_txt
+                                                                            .lines()
+                                                                            .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
+                                                                            .count();
+                                                                        format!("{} / {} lines", filtered_count, line_count)
+                                                                    }
+                                                                }}
+                                                            </span>
+                                                        </div>
+                                                        <pre
+                                                            node_ref=log_pre_ref
+                                                            on:scroll=on_log_scroll
+                                                            class="log-pre"
+                                                            style="max-height: 650px; overflow-y: auto; background: #0d1117; color: #c9d1d9; padding: 16px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; border-top-left-radius: 0; border-top-right-radius: 0; border: 1px solid #30363d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-all; margin-top: 0;"
+                                                        >
+                                                            {move || {
+                                                                let raw_txt = selected_job_log.get();
+                                                                if log_loading.get() && raw_txt.is_empty() {
+                                                                    return "Loading execution log...".to_string();
+                                                                }
+                                                                if raw_txt.is_empty() {
+                                                                    return "No execution logs recorded yet for this job.".to_string();
+                                                                }
+                                                                let filter_q = log_search.get().trim().to_ascii_lowercase();
+                                                                if filter_q.is_empty() {
+                                                                    raw_txt
+                                                                } else {
+                                                                    raw_txt
+                                                                        .lines()
+                                                                        .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
+                                                                        .collect::<Vec<_>>()
+                                                                        .join("\n")
+                                                                }
+                                                            }}
+                                                        </pre>
+                                                    </div>
                                                 </section>
                                             </div>
                                         }.into_any()
