@@ -160,6 +160,7 @@ pub fn parse_job_log(raw: &str) -> ParsedLog {
     // If no legacy steps were found, parse distributed runner logs:
     // Format: "2026-10-24T12:31:24.898184+00:00 [rubicon] [clippy-check] [stderr] Updating crates.io index"
     if steps.is_empty() {
+        pre_lines.clear();
         use std::collections::BTreeMap;
         let mut stages_map: BTreeMap<String, (String, String, Vec<String>, StepStatus)> =
             BTreeMap::new();
@@ -177,6 +178,11 @@ pub fn parse_job_log(raw: &str) -> ParsedLog {
                 let node_id = &parts[1][1..parts[1].len() - 1];
                 let stage_id = &parts[2][1..parts[2].len() - 1];
                 let content = parts[4];
+
+                if stage_id == "step-0" || stage_id == "git-sync" {
+                    pre_lines.push(line);
+                    continue;
+                }
 
                 if !stages_map.contains_key(stage_id) {
                     stage_order.push(stage_id.to_string());
@@ -199,6 +205,8 @@ pub fn parse_job_log(raw: &str) -> ParsedLog {
                     entry.3 = StepStatus::Failed;
                 }
                 entry.2.push(line.to_string());
+            } else if !line.trim().is_empty() {
+                pre_lines.push(line);
             }
         }
 
@@ -225,6 +233,38 @@ pub fn parse_job_log(raw: &str) -> ParsedLog {
         steps,
         footer_output: footer_lines.join("\n").trim().to_string(),
     }
+}
+
+pub fn extract_stage_logs(
+    raw: &str,
+) -> (Vec<String>, std::collections::HashMap<String, Vec<String>>) {
+    let mut step0_lines = Vec::new();
+    let mut stage_logs: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+
+    for line in raw.lines() {
+        let parts: Vec<&str> = line.splitn(5, ' ').collect();
+        if parts.len() == 5
+            && parts[1].starts_with('[')
+            && parts[1].ends_with(']')
+            && parts[2].starts_with('[')
+            && parts[2].ends_with(']')
+        {
+            let stage_id = &parts[2][1..parts[2].len() - 1];
+            if stage_id == "step-0" || stage_id == "git-sync" {
+                step0_lines.push(line.to_string());
+            } else {
+                stage_logs
+                    .entry(stage_id.to_string())
+                    .or_default()
+                    .push(line.to_string());
+            }
+        } else if !line.trim().is_empty() {
+            step0_lines.push(line.to_string());
+        }
+    }
+
+    (step0_lines, stage_logs)
 }
 
 #[cfg(test)]
@@ -283,7 +323,24 @@ Checking k3-core v0.1.0
         assert_eq!(parsed.steps[0].name, "clippy-check");
         assert!(parsed.steps[0].command.contains("rubicon"));
         assert_eq!(parsed.steps[1].name, "native-k3");
-        assert!(parsed.steps[1].command.contains("pey-wail-deu"));
+        assert_eq!(
+            parsed.steps[1].command,
+            "Host: pey-wail-deu (Distributed Stage)"
+        );
         assert_eq!(parsed.steps[1].status, StepStatus::Passed);
+    }
+
+    #[test]
+    fn test_extract_stage_logs_and_step0() {
+        let sample = "Job log initializing\n2026-10-24T12:00:00+00:00 [pey-wail-deu] [step-0] [stdout] Git submodule updated\n2026-10-24T12:00:01+00:00 [pey-wail-deu] [step-2] [stdout] Running clippy\n";
+        let (step0, stage_logs) = extract_stage_logs(sample);
+        assert_eq!(step0.len(), 2);
+        assert!(step0[0].contains("Job log initializing"));
+        assert!(step0[1].contains("Git submodule updated"));
+
+        assert_eq!(stage_logs.len(), 1);
+        let s2 = stage_logs.get("step-2").expect("step-2 present");
+        assert_eq!(s2.len(), 1);
+        assert!(s2[0].contains("Running clippy"));
     }
 }

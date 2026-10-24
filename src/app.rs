@@ -3,7 +3,7 @@ use gloo_net::http::Request;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::log_parser::{parse_job_log, StepStatus};
+use crate::log_parser::{extract_stage_logs, parse_job_log, StepStatus};
 use crate::models::{
     extract_repositories, filter_jobs, is_scrolled_to_bottom, job_card_svg_url,
     job_submodule_card_svg_url, score_pill_class, short_branch, short_sha, ClusterNodeView,
@@ -1674,7 +1674,11 @@ pub fn App() -> impl IntoView {
                                                                     let duration_info = match &stage.status {
                                                                         StageStatus::Completed { duration_secs, exit_code } => format!("in {}s (exit {})", duration_secs, exit_code),
                                                                         StageStatus::Failed { error } => error.clone(),
-                                                                        StageStatus::Running { started_at, .. } | StageStatus::Assigned { started_at, .. } => format!("started {}", started_at.format("%H:%M:%S")),
+                                                                        StageStatus::Running { started_at, pid, .. } => {
+                                                                            let pid_str = pid.map(|p| format!(" (PID: {})", p)).unwrap_or_default();
+                                                                            format!("started {}{}", started_at.format("%H:%M:%S"), pid_str)
+                                                                        }
+                                                                        StageStatus::Assigned { started_at, .. } => format!("started {}", started_at.format("%H:%M:%S")),
                                                                         _ => "waiting".to_string(),
                                                                     };
                                                                     let deps_info = if stage.depends_on.is_empty() {
@@ -1783,80 +1787,233 @@ pub fn App() -> impl IntoView {
 
                                                     // 1. Steps Accordion View
                                                     <div style=move || if log_view_mode.get() == "steps" { "display: block;" } else { "display: none;" }>
-                                                        {move || {
+                                                        {
+                                                            let dag_stages = rec.stages.clone();
+                                                            move || {
                                                             let raw_txt = selected_job_log.get();
-                                                            if log_loading.get() && raw_txt.is_empty() {
+                                                            if log_loading.get() && raw_txt.is_empty() && dag_stages.is_empty() {
                                                                 return view! {
                                                                     <div class="queue-empty-list">"Loading execution log..."</div>
                                                                 }.into_any();
                                                             }
 
-                                                            if raw_txt.is_empty() {
-                                                                return view! {
-                                                                    <div class="queue-empty-list">
-                                                                        "No execution logs recorded yet for this job."
-                                                                    </div>
-                                                                }.into_any();
-                                                            }
-
                                                             let filter_q = log_search.get().trim().to_ascii_lowercase();
-                                                            let parsed_log = parse_job_log(&raw_txt);
 
-                                                            if parsed_log.steps.is_empty() {
-                                                                return view! {
-                                                                    <div class="queue-empty-list">
-                                                                        "No discrete steps detected; switch to Raw Log mode to view full execution stream."
-                                                                    </div>
-                                                                }.into_any();
-                                                            }
+                                                            if !dag_stages.is_empty() {
+                                                                let (step0_lines, stage_logs_map) = extract_stage_logs(&raw_txt);
+                                                                let total_dag_stages = dag_stages.len();
 
-                                                            let steps = parsed_log.steps.clone();
-                                                            let pre = parsed_log.pre_step_output.clone();
-                                                            let post = parsed_log.footer_output.clone();
-                                                            view! {
-                                                                <div class="steps-container">
-                                                                    {(!pre.is_empty()).then(|| view! {
-                                                                        <details class="step-accordion">
+                                                                let step0_out = if filter_q.is_empty() {
+                                                                    if step0_lines.is_empty() {
+                                                                        "Workspace clone and cache preparation synchronized on host.".to_string()
+                                                                    } else {
+                                                                        step0_lines.join("\n")
+                                                                    }
+                                                                } else {
+                                                                    step0_lines
+                                                                        .iter()
+                                                                        .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
+                                                                        .cloned()
+                                                                        .collect::<Vec<_>>()
+                                                                        .join("\n")
+                                                                };
+
+                                                                let step0_badge_cls = if !step0_lines.is_empty() {
+                                                                    "step-badge step-passed"
+                                                                } else {
+                                                                    "step-badge step-running"
+                                                                };
+                                                                let step0_badge_lbl = if !step0_lines.is_empty() {
+                                                                    "✓ GIT SYNC"
+                                                                } else {
+                                                                    "⏳ GIT SYNC"
+                                                                };
+
+                                                                view! {
+                                                                    <div class="steps-container">
+                                                                        <details class="step-accordion" open=false>
                                                                             <summary class="step-summary">
-                                                                                <span class="step-badge step-passed">"✓ GIT SYNC"</span>
-                                                                                <span class="step-title">"Workspace Clone, Reset & Submodule Sync"</span>
+                                                                                <span class=step0_badge_cls>{step0_badge_lbl}</span>
+                                                                                <span class="step-title">{format!("Step [0/{}]: Workspace Clone, Reset & Submodule Sync", total_dag_stages)}</span>
+                                                                                <code class="step-cmd mono">"git clone & submodule update"</code>
                                                                             </summary>
-                                                                            <pre class="log-pre">{pre}</pre>
+                                                                            <pre class="log-pre">{step0_out}</pre>
                                                                         </details>
-                                                                    })}
 
-                                                                    {steps.into_iter().map(|step| {
-                                                                        let is_failed = step.status == StepStatus::Failed || step.status == StepStatus::TimedOut || step.status == StepStatus::Running;
-                                                                        let badge_cls = step.status.css_class();
-                                                                        let badge_lbl = step.status.label();
-                                                                        let header_title = format!("Step [{}/{}]: {}", step.number, step.total, step.name);
-                                                                        let cmd_str = step.command.clone();
-                                                                        let out = if filter_q.is_empty() {
-                                                                            step.output.clone()
-                                                                        } else {
-                                                                            step.output
-                                                                                .lines()
-                                                                                .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
-                                                                                .collect::<Vec<_>>()
-                                                                                .join("\n")
-                                                                        };
-                                                                        view! {
-                                                                            <details class="step-accordion" open=is_failed>
+                                                                        {dag_stages.iter().enumerate().map(|(idx, stage)| {
+                                                                            let step_num = idx + 1;
+                                                                            let header_title = format!("Step [{}/{}]: {}", step_num, total_dag_stages, stage.name);
+
+                                                                            let is_active_or_failed = matches!(
+                                                                                stage.status,
+                                                                                StageStatus::Failed { .. }
+                                                                                    | StageStatus::Running { .. }
+                                                                                    | StageStatus::Assigned { .. }
+                                                                            );
+
+                                                                            let (badge_lbl, badge_cls) = match &stage.status {
+                                                                                StageStatus::Pending => ("⏳ PENDING", "step-badge step-running"),
+                                                                                StageStatus::Assigned { .. } => ("🚀 ASSIGNED", "step-badge step-running"),
+                                                                                StageStatus::Running { .. } => ("⚙️ RUNNING", "step-badge step-running"),
+                                                                                StageStatus::Completed { exit_code, .. } => {
+                                                                                    if *exit_code == 0 {
+                                                                                        ("✓ PASSED", "step-badge step-passed")
+                                                                                    } else {
+                                                                                        ("✕ FAILED", "step-badge step-failed")
+                                                                                    }
+                                                                                }
+                                                                                StageStatus::Failed { .. } => ("✕ FAILED", "step-badge step-failed"),
+                                                                                StageStatus::Skipped { .. } => ("⊘ SKIPPED", "step-badge"),
+                                                                            };
+
+                                                                            let cmd_str = match &stage.status {
+                                                                                StageStatus::Pending => {
+                                                                                    if stage.depends_on.is_empty() {
+                                                                                        "Depends: None (Root Stage)".to_string()
+                                                                                    } else {
+                                                                                        format!("Depends: {}", stage.depends_on.join(", "))
+                                                                                    }
+                                                                                }
+                                                                                StageStatus::Assigned { node_id, started_at } => {
+                                                                                    format!("Host: {} (started {})", node_id, started_at.format("%H:%M:%S"))
+                                                                                }
+                                                                                StageStatus::Running { node_id, started_at, pid } => {
+                                                                                    let pid_str = pid.map(|p| format!(" (PID: {})", p)).unwrap_or_default();
+                                                                                    format!("Host: {}{} (started {})", node_id, pid_str, started_at.format("%H:%M:%S"))
+                                                                                }
+                                                                                StageStatus::Completed { duration_secs, exit_code } => {
+                                                                                    let node_info = stage.assigned_node.as_deref().unwrap_or("worker");
+                                                                                    format!("Host: {} in {}s (exit {})", node_info, duration_secs, exit_code)
+                                                                                }
+                                                                                StageStatus::Failed { error } => {
+                                                                                    let node_info = stage.assigned_node.as_deref().unwrap_or("worker");
+                                                                                    format!("Host: {} ({})", node_info, error)
+                                                                                }
+                                                                                StageStatus::Skipped { reason } => {
+                                                                                    format!("Skipped: {}", reason)
+                                                                                }
+                                                                            };
+
+                                                                            let raw_lines = stage_logs_map.get(&stage.id);
+                                                                            let out = match raw_lines {
+                                                                                Some(lines) if !lines.is_empty() => {
+                                                                                    if filter_q.is_empty() {
+                                                                                        lines.join("\n")
+                                                                                    } else {
+                                                                                        lines
+                                                                                            .iter()
+                                                                                            .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
+                                                                                            .cloned()
+                                                                                            .collect::<Vec<_>>()
+                                                                                            .join("\n")
+                                                                                    }
+                                                                                }
+                                                                                _ => {
+                                                                                    match &stage.status {
+                                                                                        StageStatus::Completed { exit_code: 0, .. } => {
+                                                                                            "(Command completed cleanly with exit code 0; no standard output or errors recorded)".to_string()
+                                                                                        }
+                                                                                        StageStatus::Pending => {
+                                                                                            "Awaiting stage dependency resolution before dispatching to cluster worker.".to_string()
+                                                                                        }
+                                                                                        StageStatus::Assigned { node_id, .. } => {
+                                                                                            format!("Stage assigned to worker host '{}'; awaiting process launch...", node_id)
+                                                                                        }
+                                                                                        StageStatus::Running { node_id, pid, .. } => {
+                                                                                            let p_info = pid.map(|p| format!(" [PID {}]", p)).unwrap_or_default();
+                                                                                            format!("Process active on worker node '{}'{}; streaming output...", node_id, p_info)
+                                                                                        }
+                                                                                        StageStatus::Skipped { reason } => {
+                                                                                            format!("Stage skipped: {}", reason)
+                                                                                        }
+                                                                                        StageStatus::Failed { error } => {
+                                                                                            format!("Stage failed: {}", error)
+                                                                                        }
+                                                                                        _ => "No logs recorded for this stage.".to_string(),
+                                                                                    }
+                                                                                }
+                                                                            };
+
+                                                                            view! {
+                                                                                <details class="step-accordion" open=is_active_or_failed>
+                                                                                    <summary class="step-summary">
+                                                                                        <span class=badge_cls>{badge_lbl}</span>
+                                                                                        <span class="step-title">{header_title}</span>
+                                                                                        <code class="step-cmd mono">{cmd_str}</code>
+                                                                                    </summary>
+                                                                                    <pre class="log-pre">{out}</pre>
+                                                                                </details>
+                                                                            }
+                                                                        }).collect_view()}
+                                                                    </div>
+                                                                }.into_any()
+                                                            } else {
+                                                                if raw_txt.is_empty() {
+                                                                    return view! {
+                                                                        <div class="queue-empty-list">
+                                                                            "No execution logs recorded yet for this job."
+                                                                        </div>
+                                                                    }.into_any();
+                                                                }
+
+                                                                let parsed_log = parse_job_log(&raw_txt);
+
+                                                                if parsed_log.steps.is_empty() {
+                                                                    return view! {
+                                                                        <div class="queue-empty-list">
+                                                                            "No discrete steps detected; switch to Raw Log mode to view full execution stream."
+                                                                        </div>
+                                                                    }.into_any();
+                                                                }
+
+                                                                let steps = parsed_log.steps.clone();
+                                                                let pre = parsed_log.pre_step_output.clone();
+                                                                let post = parsed_log.footer_output.clone();
+                                                                view! {
+                                                                    <div class="steps-container">
+                                                                        {(!pre.is_empty()).then(|| view! {
+                                                                            <details class="step-accordion">
                                                                                 <summary class="step-summary">
-                                                                                    <span class=badge_cls>{badge_lbl}</span>
-                                                                                    <span class="step-title">{header_title}</span>
-                                                                                    <code class="step-cmd mono">{cmd_str}</code>
+                                                                                    <span class="step-badge step-passed">"✓ GIT SYNC"</span>
+                                                                                    <span class="step-title">"Workspace Clone, Reset & Submodule Sync"</span>
                                                                                 </summary>
-                                                                                <pre class="log-pre">{out}</pre>
+                                                                                <pre class="log-pre">{pre}</pre>
                                                                             </details>
-                                                                        }
-                                                                    }).collect_view()}
+                                                                        })}
 
-                                                                    {(!post.is_empty()).then(|| view! {
-                                                                        <pre class="log-pre" style="margin-top: 8px;">{post}</pre>
-                                                                    })}
-                                                                </div>
-                                                            }.into_any()
+                                                                        {steps.into_iter().map(|step| {
+                                                                            let is_failed = step.status == StepStatus::Failed || step.status == StepStatus::TimedOut || step.status == StepStatus::Running;
+                                                                            let badge_cls = step.status.css_class();
+                                                                            let badge_lbl = step.status.label();
+                                                                            let header_title = format!("Step [{}/{}]: {}", step.number, step.total, step.name);
+                                                                            let cmd_str = step.command.clone();
+                                                                            let out = if filter_q.is_empty() {
+                                                                                step.output.clone()
+                                                                            } else {
+                                                                                step.output
+                                                                                    .lines()
+                                                                                    .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
+                                                                                    .collect::<Vec<_>>()
+                                                                                    .join("\n")
+                                                                            };
+                                                                            view! {
+                                                                                <details class="step-accordion" open=is_failed>
+                                                                                    <summary class="step-summary">
+                                                                                        <span class=badge_cls>{badge_lbl}</span>
+                                                                                        <span class="step-title">{header_title}</span>
+                                                                                        <code class="step-cmd mono">{cmd_str}</code>
+                                                                                    </summary>
+                                                                                    <pre class="log-pre">{out}</pre>
+                                                                                </details>
+                                                                            }
+                                                                        }).collect_view()}
+
+                                                                        {(!post.is_empty()).then(|| view! {
+                                                                            <pre class="log-pre" style="margin-top: 8px;">{post}</pre>
+                                                                        })}
+                                                                    </div>
+                                                                }.into_any()
+                                                            }
                                                         }}
                                                     </div>
 
