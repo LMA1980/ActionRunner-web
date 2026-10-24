@@ -122,6 +122,16 @@ impl StageRecord {
             None => ("⏳ Awaiting Node", "node-pill node-pending"),
         }
     }
+
+    pub fn compact_node_display(&self) -> (&'static str, &'static str) {
+        match self.execution_node() {
+            Some("entrance") => ("🖥️ entrance", "node-pill node-n100"),
+            Some("rubicon") => ("⚡ rubicon", "node-pill node-xeon"),
+            Some("pey-wail-deu") => ("🔬 pey-wail-deu", "node-pill node-k3"),
+            Some(_) => ("⚙️ remote", "node-pill node-other"),
+            None => ("⏳ awaiting", "node-pill node-pending"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -451,5 +461,33 @@ mod tests {
             submodule_card_svg_url("LMA1980/model-runner", "k3-core", ""),
             "/cards/LMA1980/k3-core/card.svg"
         );
+    }
+
+    #[test]
+    fn test_stage_record_node_displays() {
+        let mut stage = StageRecord {
+            id: "fmt".to_string(),
+            name: "fmt-check".to_string(),
+            tags: vec!["fmt".to_string()],
+            threads: 2,
+            toolchain: None,
+            depends_on: vec![],
+            status: StageStatus::Pending,
+            assigned_node: None,
+        };
+
+        assert_eq!(stage.compact_node_display().0, "⏳ awaiting");
+
+        stage.assigned_node = Some("entrance".to_string());
+        assert_eq!(stage.compact_node_display().0, "🖥️ entrance");
+        assert_eq!(stage.compact_node_display().1, "node-pill node-n100");
+
+        stage.assigned_node = Some("rubicon".to_string());
+        assert_eq!(stage.compact_node_display().0, "⚡ rubicon");
+        assert_eq!(stage.compact_node_display().1, "node-pill node-xeon");
+
+        stage.assigned_node = Some("pey-wail-deu".to_string());
+        assert_eq!(stage.compact_node_display().0, "🔬 pey-wail-deu");
+        assert_eq!(stage.compact_node_display().1, "node-pill node-k3");
     }
 }

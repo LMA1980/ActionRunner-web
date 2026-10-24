@@ -477,6 +477,7 @@ pub fn App() -> impl IntoView {
                                             let sender = active.record.job.sender.clone();
                                             let evt = active.record.job.event_type.clone();
                                             let elapsed = active.elapsed_secs.unwrap_or(0);
+                                            let stages = active.record.stages.clone();
                                             view! {
                                                 <div class="active-job-spotlight">
                                                     <div class="spotlight-left">
@@ -495,6 +496,35 @@ pub fn App() -> impl IntoView {
                                                             "Drill Down & Live Log →"
                                                         </button>
                                                     </div>
+                                                    {(!stages.is_empty()).then(|| view! {
+                                                        <div class="spotlight-stages-strip">
+                                                            <span class="sub-row-label">"PIPELINE ALLOCATION"</span>
+                                                            <div class="job-stages-pills">
+                                                                {stages.into_iter().map(|s| {
+                                                                    let (host_label, host_class) = s.compact_node_display();
+                                                                    let dur_or_status = match &s.status {
+                                                                        StageStatus::Completed { exit_code: 0, duration_secs } => format!("{}s ✓", duration_secs),
+                                                                        StageStatus::Completed { exit_code: _, duration_secs } => format!("{}s ✕", duration_secs),
+                                                                        StageStatus::Running { .. } => "⚡ active".to_string(),
+                                                                        StageStatus::Assigned { .. } => "🚀 leased".to_string(),
+                                                                        StageStatus::Failed { .. } => "✕ err".to_string(),
+                                                                        StageStatus::Skipped { .. } => "⊘ skip".to_string(),
+                                                                        StageStatus::Pending => "⏳ wait".to_string(),
+                                                                    };
+                                                                    let s_name = s.name.clone();
+                                                                    let s_title = format!("Stage '{}' on {}", s.name, host_label);
+                                                                    view! {
+                                                                        <span class=format!("stage-host-badge {}", host_class) title=s_title>
+                                                                            <span class="badge-stage-name">{s_name}</span>
+                                                                            <span class="badge-host-sep">"•"</span>
+                                                                            <span class="badge-host-name">{host_label}</span>
+                                                                            <span class="badge-stage-dur mono">{dur_or_status}</span>
+                                                                        </span>
+                                                                    }
+                                                                }).collect_view()}
+                                                            </div>
+                                                        </div>
+                                                    })}
                                                 </div>
                                             }.into_any()
                                         }
@@ -563,6 +593,7 @@ pub fn App() -> impl IntoView {
                                 <div class="cluster-nodes-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; padding: 12px 16px;">
                                     {move || {
                                         let nodes = cluster_nodes.get();
+                                        let all_jobs = jobs_list.get();
                                         if nodes.is_empty() {
                                             view! {
                                                 <div class="queue-empty-list" style="grid-column: 1 / -1;">
@@ -591,6 +622,41 @@ pub fn App() -> impl IntoView {
                                                 } else {
                                                     "border: 1px solid #30363d;"
                                                 };
+
+                                                let (completed_count, latest_stage_info, running_stage_info) = {
+                                                    let mut completed = 0;
+                                                    let mut latest = None;
+                                                    let mut running = None;
+                                                    for job in &all_jobs {
+                                                        for stage in &job.stages {
+                                                            if stage.execution_node() == Some(&node.node_id) {
+                                                                match &stage.status {
+                                                                    StageStatus::Running { .. } | StageStatus::Assigned { .. } => {
+                                                                        if running.is_none() {
+                                                                            running = Some(format!("⚡ {}", stage.name));
+                                                                        }
+                                                                    }
+                                                                    StageStatus::Completed { duration_secs, exit_code } => {
+                                                                        completed += 1;
+                                                                        if latest.is_none() {
+                                                                            let mark = if *exit_code == 0 { "✓" } else { "✕" };
+                                                                            latest = Some(format!("{} ({}s) {}", stage.name, duration_secs, mark));
+                                                                        }
+                                                                    }
+                                                                    StageStatus::Failed { .. } => {
+                                                                        completed += 1;
+                                                                        if latest.is_none() {
+                                                                            latest = Some(format!("{} (failed)", stage.name));
+                                                                        }
+                                                                    }
+                                                                    _ => {}
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    (completed, latest, running)
+                                                };
+
                                                 view! {
                                                     <div
                                                         style=format!("background: #161b22; border-radius: 8px; padding: 14px; cursor: pointer; transition: all 0.2s; {}", border_style)
@@ -633,6 +699,28 @@ pub fn App() -> impl IntoView {
                                                         <div style="font-size: 11px; margin-top: 6px;">
                                                             <span class="meta-label">"Tags: "</span>
                                                             <span class="mono muted-text">{tags_str}</span>
+                                                        </div>
+                                                        <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #21262d; font-size: 12px; display: flex; flex-direction: column; gap: 4px;">
+                                                            <div style="display: flex; justify-content: space-between;">
+                                                                <span class="meta-label">"Executed Stages: "</span>
+                                                                <span style="font-weight: 600; color: #58a6ff;">{format!("{} completed", completed_count)}</span>
+                                                            </div>
+                                                            {running_stage_info.clone().map(|r| view! {
+                                                                <div style="display: flex; justify-content: space-between; font-size: 11px;">
+                                                                    <span class="meta-label">"Now Running: "</span>
+                                                                    <span class="mono" style="color: #e3b341; font-weight: 600;">{r}</span>
+                                                                </div>
+                                                            })}
+                                                            {if running_stage_info.is_none() {
+                                                                latest_stage_info.map(|l| view! {
+                                                                    <div style="display: flex; justify-content: space-between; font-size: 11px;">
+                                                                        <span class="meta-label">"Latest Stage: "</span>
+                                                                        <span class="mono" style="color: #7ee787;">{l}</span>
+                                                                    </div>
+                                                                })
+                                                            } else {
+                                                                None
+                                                            }}
                                                         </div>
                                                         <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
                                                             <span class="btn" style="padding: 3px 10px; font-size: 11px;">
@@ -810,7 +898,7 @@ pub fn App() -> impl IntoView {
                                                                         let jid = job.id.clone();
                                                                         let (status_txt, status_cls) = match &stage.status {
                                                                             StageStatus::Completed { exit_code, .. } if *exit_code == 0 => ("✓ Passed", "status-pill status-completed"),
-                                                                            StageStatus::Completed { exit_code: _, .. } => ("✕ Exit non-zero", "status-pill status-failed"),
+                                                                            StageStatus::Completed { .. } => ("✕ Exit non-zero", "status-pill status-failed"),
                                                                             StageStatus::Failed { .. } => ("✕ Failed", "status-pill status-failed"),
                                                                             StageStatus::Skipped { .. } => ("⊘ Skipped", "status-pill status-skipped"),
                                                                             _ => ("—", "status-pill status-queued"),
@@ -982,6 +1070,40 @@ pub fn App() -> impl IntoView {
                                                                             }
                                                                         }).collect_view()}
                                                                     </div>
+                                                                })}
+
+                                                                // Distributed DAG Stage Execution Badges (inline on main job row)
+                                                                {(!rec.stages.is_empty()).then(|| {
+                                                                    let stages = rec.stages.clone();
+                                                                    view! {
+                                                                        <div class="job-stages-row">
+                                                                            <span class="sub-row-label">"PIPELINE HOSTS"</span>
+                                                                            <div class="job-stages-pills">
+                                                                                {stages.into_iter().map(|s| {
+                                                                                    let (host_label, host_class) = s.compact_node_display();
+                                                                                    let dur_or_status = match &s.status {
+                                                                                        StageStatus::Completed { exit_code: 0, duration_secs } => format!("{}s ✓", duration_secs),
+                                                                                        StageStatus::Completed { exit_code: _, duration_secs } => format!("{}s ✕", duration_secs),
+                                                                                        StageStatus::Running { .. } => "⚡ active".to_string(),
+                                                                                        StageStatus::Assigned { .. } => "🚀 leased".to_string(),
+                                                                                        StageStatus::Failed { .. } => "✕ err".to_string(),
+                                                                                        StageStatus::Skipped { .. } => "⊘ skip".to_string(),
+                                                                                        StageStatus::Pending => "⏳ pending".to_string(),
+                                                                                    };
+                                                                                    let s_name = s.name.clone();
+                                                                                    let s_title = format!("Stage '{}' executed on {}", s.name, host_label);
+                                                                                    view! {
+                                                                                        <span class=format!("stage-host-badge {}", host_class) title=s_title>
+                                                                                            <span class="badge-stage-name">{s_name}</span>
+                                                                                            <span class="badge-host-sep">"•"</span>
+                                                                                            <span class="badge-host-name">{host_label}</span>
+                                                                                            <span class="badge-stage-dur mono">{dur_or_status}</span>
+                                                                                        </span>
+                                                                                    }
+                                                                                }).collect_view()}
+                                                                            </div>
+                                                                        </div>
+                                                                    }
                                                                 })}
 
                                                                 {status_note.map(|note| view! {
