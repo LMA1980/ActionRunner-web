@@ -67,11 +67,24 @@ pub struct JobMetrics {
 #[serde(tag = "state", content = "details")]
 pub enum StageStatus {
     Pending,
-    Assigned { node_id: String, started_at: DateTime<Utc> },
-    Running { node_id: String, started_at: DateTime<Utc> },
-    Completed { duration_secs: u64, exit_code: i32 },
-    Failed { error: String },
-    Skipped { reason: String },
+    Assigned {
+        node_id: String,
+        started_at: DateTime<Utc>,
+    },
+    Running {
+        node_id: String,
+        started_at: DateTime<Utc>,
+    },
+    Completed {
+        duration_secs: u64,
+        exit_code: i32,
+    },
+    Failed {
+        error: String,
+    },
+    Skipped {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -83,6 +96,32 @@ pub struct StageRecord {
     pub toolchain: Option<String>,
     pub depends_on: Vec<String>,
     pub status: StageStatus,
+    #[serde(default)]
+    pub assigned_node: Option<String>,
+}
+
+impl StageRecord {
+    pub fn execution_node(&self) -> Option<&str> {
+        if let Some(ref node) = self.assigned_node {
+            return Some(node.as_str());
+        }
+        match &self.status {
+            StageStatus::Assigned { node_id, .. } | StageStatus::Running { node_id, .. } => {
+                Some(node_id.as_str())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn node_display(&self) -> (&'static str, &'static str) {
+        match self.execution_node() {
+            Some("entrance") => ("🖥️ entrance (N100)", "node-pill node-n100"),
+            Some("rubicon") => ("⚡ rubicon (Xeon)", "node-pill node-xeon"),
+            Some("pey-wail-deu") => ("🔬 pey-wail-deu (K3)", "node-pill node-k3"),
+            Some(_) => ("⚙️ Remote Worker", "node-pill node-other"),
+            None => ("⏳ Awaiting Node", "node-pill node-pending"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -352,6 +391,7 @@ mod tests {
             metrics: None,
             queue_position: None,
             elapsed_secs: None,
+            stages: Vec::new(),
         }
     }
 

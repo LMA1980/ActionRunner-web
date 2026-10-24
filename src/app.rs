@@ -6,7 +6,8 @@ use leptos::task::spawn_local;
 use crate::log_parser::{parse_job_log, StepStatus};
 use crate::models::{
     card_svg_url, extract_repositories, filter_jobs, score_pill_class, short_branch, short_sha,
-    submodule_card_svg_url, JobRecord, JobStatus, JobsListResponse, QueueSnapshot,
+    submodule_card_svg_url, ClusterNodeView, JobRecord, JobStatus, JobsListResponse, QueueSnapshot,
+    StageStatus,
 };
 
 fn default_api_base() -> String {
@@ -145,6 +146,32 @@ async fn fetch_single_job(api_base: &str, job_id: &str) -> Result<JobRecord, Str
     }
 }
 
+async fn fetch_cluster_nodes(api_base: &str) -> Result<Vec<ClusterNodeView>, String> {
+    let primary_url = format!("{}/api/cluster/nodes", api_base);
+    match Request::get(&primary_url).send().await {
+        Ok(resp) if resp.ok() => resp
+            .json::<Vec<ClusterNodeView>>()
+            .await
+            .map_err(|e| format!("Failed to parse /api/cluster/nodes JSON: {}", e)),
+        _ => {
+            let fallback_url = format!("{}/cluster/nodes", api_base);
+            let resp = Request::get(&fallback_url)
+                .send()
+                .await
+                .map_err(|e| format!("Network error fetching cluster nodes: {}", e))?;
+            if !resp.ok() {
+                return Err(format!(
+                    "HTTP {} from cluster nodes endpoint",
+                    resp.status()
+                ));
+            }
+            resp.json::<Vec<ClusterNodeView>>()
+                .await
+                .map_err(|e| format!("Failed to parse cluster nodes JSON: {}", e))
+        }
+    }
+}
+
 async fn fetch_job_log_text(api_base: &str, job_id: &str) -> Result<String, String> {
     let primary_url = format!("{}/api/jobs/{}/log", api_base, job_id);
     match Request::get(&primary_url).send().await {
@@ -173,6 +200,7 @@ pub fn App() -> impl IntoView {
     let api_base = RwSignal::new(default_api_base());
     let queue_snap = RwSignal::new(None::<QueueSnapshot>);
     let jobs_list = RwSignal::new(Vec::<JobRecord>::new());
+    let cluster_nodes = RwSignal::new(Vec::<ClusterNodeView>::new());
     let error_banner = RwSignal::new(None::<String>);
     let last_updated = RwSignal::new(String::from("Loading..."));
     let auto_refresh = RwSignal::new(true);
@@ -186,9 +214,11 @@ pub fn App() -> impl IntoView {
     let selected_job_id = RwSignal::new(initial_selected_job_id());
     let selected_job_record = RwSignal::new(None::<JobRecord>);
     let selected_job_log = RwSignal::new(String::new());
+    let selected_worker_id = RwSignal::new(None::<String>);
     let log_loading = RwSignal::new(false);
-    let log_view_mode = RwSignal::new(String::from("steps")); // "steps" or "raw"
+    let log_view_mode = RwSignal::new(String::from("raw")); // "raw" or "steps"
     let log_search = RwSignal::new(String::new());
+    let log_copied = RwSignal::new(false);
 
     let refresh_all = move || {
         let base = api_base.get_untracked();
@@ -197,14 +227,22 @@ pub fn App() -> impl IntoView {
             match (
                 fetch_queue_snapshot(&base).await,
                 fetch_jobs_list(&base).await,
+                fetch_cluster_nodes(&base).await,
             ) {
-                (Ok(snap), Ok(list)) => {
+                (Ok(snap), Ok(list), Ok(nodes)) => {
+                    queue_snap.set(Some(snap));
+                    jobs_list.set(list.jobs);
+                    cluster_nodes.set(nodes);
+                    error_banner.set(None);
+                    last_updated.set(Utc::now().format("%H:%M:%S UTC").to_string());
+                }
+                (Ok(snap), Ok(list), Err(_)) => {
                     queue_snap.set(Some(snap));
                     jobs_list.set(list.jobs);
                     error_banner.set(None);
                     last_updated.set(Utc::now().format("%H:%M:%S UTC").to_string());
                 }
-                (Err(e), _) | (_, Err(e)) => {
+                (Err(e), _, _) | (_, Err(e), _) => {
                     error_banner.set(Some(e));
                 }
             }
@@ -309,7 +347,19 @@ pub fn App() -> impl IntoView {
 
                 <div class="topbar-controls">
                     <span class=move || if runner_busy() { "runner-pill runner-busy" } else { "runner-pill runner-idle" }>
-                        {move || if runner_busy() { "⏳ WORKER BUSY (1/1)" } else { "✓ WORKER IDLE (0/1)" }}
+                        {move || {
+                            let active_slots: u32 = cluster_nodes.get().iter().map(|n| n.active_slots).sum();
+                            let total_slots: u32 = cluster_nodes.get().iter().map(|n| n.max_slots).sum();
+                            if active_slots > 0 {
+                                format!("⏳ RUNNING ({}/{})", active_slots, total_slots)
+                            } else if total_slots > 0 {
+                                format!("✓ FABRIC IDLE (0/{})", total_slots)
+                            } else if runner_busy() {
+                                "⏳ WORKER BUSY".to_string()
+                            } else {
+                                "✓ WORKER IDLE".to_string()
+                            }
+                        }}
                     </span>
 
                     <span class="updated-label">
@@ -356,9 +406,28 @@ pub fn App() -> impl IntoView {
                                             <div class="kpi-sub">"Waiting in FIFO order"</div>
                                         </div>
                                         <div class="kpi-tile">
-                                            <div class="kpi-label">"ACTIVE WORKER"</div>
-                                            <div class="kpi-value kpi-blue">{format!("{}/1", stats.running_jobs)}</div>
-                                            <div class="kpi-sub">"Single-host concurrency"</div>
+                                            <div class="kpi-label">"ACTIVE RUNNERS"</div>
+                                            <div class="kpi-value kpi-blue">
+                                                {move || {
+                                                    let active_slots: u32 = cluster_nodes.get().iter().map(|n| n.active_slots).sum();
+                                                    let total_slots: u32 = cluster_nodes.get().iter().map(|n| n.max_slots).sum();
+                                                    if total_slots > 0 {
+                                                        format!("{}/{} Slots", active_slots, total_slots)
+                                                    } else {
+                                                        format!("{}/1", stats.running_jobs)
+                                                    }
+                                                }}
+                                            </div>
+                                            <div class="kpi-sub">
+                                                {move || {
+                                                    let count = cluster_nodes.get().iter().filter(|n| n.is_online).count();
+                                                    if count > 0 {
+                                                        format!("{} nodes in cluster", count)
+                                                    } else {
+                                                        "Single-host concurrency".to_string()
+                                                    }
+                                                }}
+                                            </div>
                                         </div>
                                         <div class="kpi-tile">
                                             <div class="kpi-label">"PASSING BUILDS"</div>
@@ -480,6 +549,301 @@ pub fn App() -> impl IntoView {
                                             </div>
                                         }.into_any()
                                     }
+                                }}
+                            </section>
+
+                            // Distributed Cluster Fabric Nodes Monitor
+                            <section class="panel">
+                                <div class="panel-header">
+                                    <h2 class="panel-title">"Distributed Cluster Fabric Nodes"</h2>
+                                    <span class="panel-badge">
+                                        {move || format!("{} Nodes Online", cluster_nodes.get().iter().filter(|n| n.is_online).count())}
+                                    </span>
+                                </div>
+                                <div class="cluster-nodes-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; padding: 12px 16px;">
+                                    {move || {
+                                        let nodes = cluster_nodes.get();
+                                        if nodes.is_empty() {
+                                            view! {
+                                                <div class="queue-empty-list" style="grid-column: 1 / -1;">
+                                                    "Connecting to cluster coordination fabric..."
+                                                </div>
+                                            }.into_any()
+                                        } else {
+                                            nodes.into_iter().map(|node| {
+                                                let nid = node.node_id.clone();
+                                                let is_selected = selected_worker_id.get().as_deref() == Some(&nid);
+                                                let status_pill = if node.is_online {
+                                                    "status-pill status-completed"
+                                                } else {
+                                                    "status-pill status-failed"
+                                                };
+                                                let status_label = if node.is_online { "Online" } else { "Offline" };
+                                                let (icon, role) = match node.node_id.as_str() {
+                                                    "entrance" => ("🖥️", "Fast Linter & Security Auditor (Intel N100)"),
+                                                    "rubicon" => ("⚡", "Heavy Compute & Cross-Compiler (HP Xeon E3-1245)"),
+                                                    "pey-wail-deu" => ("🔬", "Native Truth Engine & Ingress (SpacemiT K3)"),
+                                                    _ => ("⚙️", "Distributed Execution Node"),
+                                                };
+                                                let tags_str = node.tags.join(", ");
+                                                let border_style = if is_selected {
+                                                    "border: 1px solid #58a6ff; box-shadow: 0 0 10px rgba(88, 166, 255, 0.25);"
+                                                } else {
+                                                    "border: 1px solid #30363d;"
+                                                };
+                                                view! {
+                                                    <div
+                                                        style=format!("background: #161b22; border-radius: 8px; padding: 14px; cursor: pointer; transition: all 0.2s; {}", border_style)
+                                                        on:click={
+                                                            let nid = nid.clone();
+                                                            move |_| {
+                                                                if selected_worker_id.get().as_deref() == Some(&nid) {
+                                                                    selected_worker_id.set(None);
+                                                                } else {
+                                                                    selected_worker_id.set(Some(nid.clone()));
+                                                                }
+                                                            }
+                                                        }
+                                                    >
+                                                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                                                            <div>
+                                                                <div style="font-weight: 700; font-size: 15px; color: #58a6ff;">{format!("{} {}", icon, node.node_id)}</div>
+                                                                <div class="muted-text" style="font-size: 11px;">{role}</div>
+                                                            </div>
+                                                            <span class=status_pill>{status_label}</span>
+                                                        </div>
+                                                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; font-size: 12px;">
+                                                            <div>
+                                                                <span class="meta-label">"Slots: "</span>
+                                                                <span style="font-weight: 600; color: #e6edf3;">{format!("{}/{} active", node.active_slots, node.max_slots)}</span>
+                                                            </div>
+                                                            <div>
+                                                                <span class="meta-label">"Arch: "</span>
+                                                                <span class="mono" style="color: #e6edf3;">{node.arch}</span>
+                                                            </div>
+                                                            <div>
+                                                                <span class="meta-label">"RAM: "</span>
+                                                                <span>{format!("{:.1} / {:.1} GiB", node.ram_used_mb as f64 / 1024.0, node.ram_total_mb as f64 / 1024.0)}</span>
+                                                            </div>
+                                                            <div>
+                                                                <span class="meta-label">"CPU Load: "</span>
+                                                                <span>{format!("{:.0}%", node.cpu_load_pct)}</span>
+                                                            </div>
+                                                        </div>
+                                                        <div style="font-size: 11px; margin-top: 6px;">
+                                                            <span class="meta-label">"Tags: "</span>
+                                                            <span class="mono muted-text">{tags_str}</span>
+                                                        </div>
+                                                        <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
+                                                            <span class="btn" style="padding: 3px 10px; font-size: 11px;">
+                                                                {if is_selected { "✕ Hide Worker Details" } else { "Drill Down Into Worker →" }}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                }
+                                            }).collect_view().into_any()
+                                        }
+                                    }}
+                                </div>
+
+                                // Worker Drill-Down Details Panel
+                                {move || {
+                                    let sel_id = selected_worker_id.get();
+                                    let nodes = cluster_nodes.get();
+                                    let jobs = jobs_list.get();
+
+                                    sel_id.and_then(|target_id| {
+                                        nodes.into_iter().find(|n| n.node_id == target_id).map(|node| {
+                                            let mut active_stages = Vec::new();
+                                            let mut past_stages = Vec::new();
+
+                                            for job_rec in &jobs {
+                                                for stage in &job_rec.stages {
+                                                    if stage.execution_node() == Some(&node.node_id) {
+                                                        let item = (job_rec.job.clone(), stage.clone());
+                                                        if matches!(stage.status, StageStatus::Running { .. } | StageStatus::Assigned { .. }) {
+                                                            active_stages.push(item);
+                                                        } else {
+                                                            past_stages.push(item);
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            let (icon, role) = match node.node_id.as_str() {
+                                                "entrance" => ("🖥️", "Fast Linter & Security Auditor (Intel N100)"),
+                                                "rubicon" => ("⚡", "Heavy Compute & Cross-Compiler (HP Xeon E3-1245)"),
+                                                "pey-wail-deu" => ("🔬", "Native Truth Engine & Ingress (SpacemiT K3)"),
+                                                _ => ("⚙️", "Distributed Execution Node"),
+                                            };
+
+                                            let tags_str = node.tags.join(", ");
+                                            let toolchains_str = if node.toolchains.is_empty() {
+                                                "system (default)".to_string()
+                                            } else {
+                                                node.toolchains.join(", ")
+                                            };
+
+                                            view! {
+                                                <div style="margin: 12px 16px 16px 16px; background: #0d1117; border: 1px solid #58a6ff; border-radius: 8px; padding: 16px;">
+                                                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; padding-bottom: 12px; margin-bottom: 14px;">
+                                                        <div>
+                                                            <div style="display: flex; align-items: center; gap: 8px;">
+                                                                <span style="font-size: 20px;">{icon}</span>
+                                                                <h3 style="font-size: 16px; font-weight: 700; color: #58a6ff;">{format!("Worker Drill-Down: {}", node.node_id)}</h3>
+                                                                <span class=if node.is_online { "status-pill status-completed" } else { "status-pill status-failed" }>
+                                                                    {if node.is_online { "Online" } else { "Offline" }}
+                                                                </span>
+                                                            </div>
+                                                            <div class="muted-text" style="font-size: 12px; margin-top: 2px;">{role}</div>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            class="btn"
+                                                            style="padding: 4px 12px; font-size: 12px;"
+                                                            on:click=move |_| selected_worker_id.set(None)
+                                                        >
+                                                            "✕ Close Worker View"
+                                                        </button>
+                                                    </div>
+
+                                                    // Hardware & Performance KPI Grid
+                                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
+                                                        <div class="kpi-tile" style="background: #161b22; padding: 10px; border-radius: 6px;">
+                                                            <div class="kpi-label">"ARCHITECTURE"</div>
+                                                            <div class="kpi-value mono" style="font-size: 15px; color: #e6edf3;">{node.arch.clone()}</div>
+                                                            <div class="kpi-sub">{format!("Max Concurrency Slots: {}", node.max_slots)}</div>
+                                                        </div>
+                                                        <div class="kpi-tile" style="background: #161b22; padding: 10px; border-radius: 6px;">
+                                                            <div class="kpi-label">"ACTIVE LEASES"</div>
+                                                            <div class="kpi-value" style="font-size: 15px; color: #58a6ff;">{format!("{}/{} active slots", node.active_slots, node.max_slots)}</div>
+                                                            <div class="kpi-sub">"Arrow IPC execution pipelines"</div>
+                                                        </div>
+                                                        <div class="kpi-tile" style="background: #161b22; padding: 10px; border-radius: 6px;">
+                                                            <div class="kpi-label">"SYSTEM MEMORY (RAM)"</div>
+                                                            <div class="kpi-value" style="font-size: 15px; color: #3fb950;">{format!("{:.1} / {:.1} GiB", node.ram_used_mb as f64 / 1024.0, node.ram_total_mb as f64 / 1024.0)}</div>
+                                                            <div class="kpi-sub">{format!("{:.0}% RAM utilized", if node.ram_total_mb > 0 { (node.ram_used_mb as f64 / node.ram_total_mb as f64) * 100.0 } else { 0.0 })}</div>
+                                                        </div>
+                                                        <div class="kpi-tile" style="background: #161b22; padding: 10px; border-radius: 6px;">
+                                                            <div class="kpi-label">"CPU UTILIZATION"</div>
+                                                            <div class="kpi-value" style="font-size: 15px; color: #dbab09;">{format!("{:.1}%", node.cpu_load_pct)}</div>
+                                                            <div class="kpi-sub">"Live system load"</div>
+                                                        </div>
+                                                    </div>
+
+                                                    // Capabilities, Tags & Toolchains
+                                                    <div style="background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 12px; display: flex; flex-direction: column; gap: 6px;">
+                                                        <div>
+                                                            <span class="meta-label">"Execution Tags: "</span>
+                                                            <span class="mono" style="color: #58a6ff;">{tags_str}</span>
+                                                        </div>
+                                                        <div>
+                                                            <span class="meta-label">"Toolchains: "</span>
+                                                            <span class="mono" style="color: #7ee787;">{toolchains_str}</span>
+                                                        </div>
+                                                        <div>
+                                                            <span class="meta-label">"Btrfs Ephemeral CoW: "</span>
+                                                            <span class="mono">{if node.btrfs_enabled { "Enabled (instant snapshot workspaces)" } else { "Disabled (standard directory clone)" }}</span>
+                                                        </div>
+                                                    </div>
+
+                                                    // Active Stages Section
+                                                    <div style="margin-bottom: 16px;">
+                                                        <h4 style="font-size: 13px; font-weight: 700; color: #e6edf3; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                                                            <span>"Active Execution Stages"</span>
+                                                            <span class="panel-badge">{format!("{} active", active_stages.len())}</span>
+                                                        </h4>
+                                                        {if active_stages.is_empty() {
+                                                            view! {
+                                                                <div class="queue-empty-list" style="background: #161b22; padding: 10px; border-radius: 6px;">
+                                                                    "No tasks currently executing on this worker (Worker is idle)."
+                                                                </div>
+                                                            }.into_any()
+                                                        } else {
+                                                            view! {
+                                                                <div style="display: flex; flex-direction: column; gap: 8px;">
+                                                                    {active_stages.into_iter().map(|(job, stage)| {
+                                                                        let jid = job.id.clone();
+                                                                        view! {
+                                                                            <div style="background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center;">
+                                                                                <div>
+                                                                                    <div style="font-weight: 600; color: #58a6ff;">{format!("{} > {}", job.repo_name, stage.name)}</div>
+                                                                                    <div class="mono muted-text" style="font-size: 11px;">
+                                                                                        {format!("Job: {} | Ref: {} | Stage ID: {}", job.id, job.ref_name, stage.id)}
+                                                                                    </div>
+                                                                                </div>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    class="btn"
+                                                                                    style="padding: 3px 10px; font-size: 11px;"
+                                                                                    on:click=move |_| {
+                                                                                        selected_job_id.set(Some(jid.clone()));
+                                                                                        set_url_job_hash(Some(&jid));
+                                                                                    }
+                                                                                >
+                                                                                    "Inspect Job Logs →"
+                                                                                </button>
+                                                                            </div>
+                                                                        }
+                                                                    }).collect_view()}
+                                                                </div>
+                                                            }.into_any()
+                                                        }}
+                                                    </div>
+
+                                                    // Stage Execution History Section
+                                                    <div>
+                                                        <h4 style="font-size: 13px; font-weight: 700; color: #e6edf3; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                                                            <span>"Recent Executed Stages on this Worker"</span>
+                                                            <span class="panel-badge">{format!("{} stages", past_stages.len())}</span>
+                                                        </h4>
+                                                        {if past_stages.is_empty() {
+                                                            view! {
+                                                                <div class="queue-empty-list" style="background: #161b22; padding: 10px; border-radius: 6px;">
+                                                                    "No recent pipeline stages attributed to this worker yet."
+                                                                </div>
+                                                            }.into_any()
+                                                        } else {
+                                                            view! {
+                                                                <div style="display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto;">
+                                                                    {past_stages.into_iter().take(15).map(|(job, stage)| {
+                                                                        let jid = job.id.clone();
+                                                                        let (status_txt, status_cls) = match &stage.status {
+                                                                            StageStatus::Completed { exit_code, .. } if *exit_code == 0 => ("✓ Passed", "status-pill status-completed"),
+                                                                            StageStatus::Completed { exit_code: _, .. } => ("✕ Exit non-zero", "status-pill status-failed"),
+                                                                            StageStatus::Failed { .. } => ("✕ Failed", "status-pill status-failed"),
+                                                                            StageStatus::Skipped { .. } => ("⊘ Skipped", "status-pill status-skipped"),
+                                                                            _ => ("—", "status-pill status-queued"),
+                                                                        };
+                                                                        view! {
+                                                                            <div style="background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 12px;">
+                                                                                <div style="display: flex; align-items: center; gap: 10px;">
+                                                                                    <span class=status_cls>{status_txt}</span>
+                                                                                    <span style="font-weight: 600; color: #e6edf3;">{stage.name.clone()}</span>
+                                                                                    <span class="mono muted-text" style="font-size: 11px;">{format!("({})", job.repo_name)}</span>
+                                                                                </div>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    class="btn"
+                                                                                    style="padding: 2px 8px; font-size: 11px;"
+                                                                                    on:click=move |_| {
+                                                                                        selected_job_id.set(Some(jid.clone()));
+                                                                                        set_url_job_hash(Some(&jid));
+                                                                                    }
+                                                                                >
+                                                                                    "View Log"
+                                                                                </button>
+                                                                            </div>
+                                                                        }
+                                                                    }).collect_view()}
+                                                                </div>
+                                                            }.into_any()
+                                                        }}
+                                                    </div>
+                                                </div>
+                                            }
+                                        })
+                                    })
                                 }}
                             </section>
 
@@ -651,8 +1015,6 @@ pub fn App() -> impl IntoView {
                     Some(job_id) => {
                         let rec_opt = selected_job_record.get();
                         let base = api_base.get();
-                        let raw_log = selected_job_log.get();
-                        let parsed_log = parse_job_log(&raw_log);
                         let now = Utc::now();
 
                         view! {
@@ -822,7 +1184,71 @@ pub fn App() -> impl IntoView {
                                                     }
                                                 })}
 
-                                                // Step-by-Step & Raw Build Log Viewer
+                                                // Distributed DAG Pipeline Stages & Host Allocation Panel
+                                                {(!rec.stages.is_empty()).then(|| {
+                                                    view! {
+                                                        <section class="panel">
+                                                            <div class="panel-header">
+                                                                <h2 class="panel-title">"Distributed DAG Pipeline Stages & Host Allocation"</h2>
+                                                                <span class="panel-badge">{format!("{} Stages", rec.stages.len())}</span>
+                                                            </div>
+                                                            <div class="stages-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; padding: 12px 16px;">
+                                                                {rec.stages.iter().map(|stage| {
+                                                                    let (node_label, node_class) = stage.node_display();
+                                                                    let (status_txt, status_class) = match &stage.status {
+                                                                        StageStatus::Pending => ("⏳ Pending", "status-pill status-queued"),
+                                                                        StageStatus::Assigned { .. } => ("🚀 Assigned", "status-pill status-running"),
+                                                                        StageStatus::Running { .. } => ("⚙️ Running", "status-pill status-running"),
+                                                                        StageStatus::Completed { exit_code, .. } => {
+                                                                            if *exit_code == 0 {
+                                                                                ("✓ Completed", "status-pill status-completed")
+                                                                            } else {
+                                                                                ("✕ Failed", "status-pill status-failed")
+                                                                            }
+                                                                        }
+                                                                        StageStatus::Failed { .. } => ("✕ Failed", "status-pill status-failed"),
+                                                                        StageStatus::Skipped { .. } => ("⊘ Skipped", "status-pill status-skipped"),
+                                                                    };
+                                                                    let duration_info = match &stage.status {
+                                                                        StageStatus::Completed { duration_secs, exit_code } => format!("in {}s (exit {})", duration_secs, exit_code),
+                                                                        StageStatus::Failed { error } => error.clone(),
+                                                                        StageStatus::Running { started_at, .. } | StageStatus::Assigned { started_at, .. } => format!("started {}", started_at.format("%H:%M:%S")),
+                                                                        _ => "waiting".to_string(),
+                                                                    };
+                                                                    let deps_info = if stage.depends_on.is_empty() {
+                                                                        "None (Root Stage)".to_string()
+                                                                    } else {
+                                                                        stage.depends_on.join(", ")
+                                                                    };
+                                                                    let tags_str = stage.tags.join(", ");
+                                                                    view! {
+                                                                        <div class="stage-detail-card" style="background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px;">
+                                                                            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                                                                                <div>
+                                                                                    <div style="font-weight: 600; font-size: 14px; color: #e6edf3;">{stage.name.clone()}</div>
+                                                                                    <div class="mono muted-text" style="font-size: 11px;">{stage.id.clone()}</div>
+                                                                                </div>
+                                                                                <span class=status_class>{status_txt}</span>
+                                                                            </div>
+                                                                            <div style="margin-bottom: 8px;">
+                                                                                <span class="meta-label">"Execution Host: "</span>
+                                                                                <span class=node_class style="padding: 2px 8px; border-radius: 10px; font-weight: 600; font-size: 11px; background: #21262d; border: 1px solid #30363d;">{node_label}</span>
+                                                                                <span class="muted-text" style="font-size: 11px; margin-left: 6px;">{duration_info}</span>
+                                                                            </div>
+                                                                            <div class="mono" style="font-size: 11px; color: #8b949e; display: flex; flex-direction: column; gap: 4px;">
+                                                                                <div><span class="meta-label">"Depends: "</span>{deps_info}</div>
+                                                                                <div><span class="meta-label">"Tags: "</span>{tags_str}</div>
+                                                                                <div><span class="meta-label">"Threads: "</span>{format!("{} cores", stage.threads)}</div>
+                                                                            </div>
+                                                                        </div>
+                                                                    }
+                                                                }).collect_view()}
+                                                            </div>
+                                                        </section>
+                                                    }
+                                                })}
+
+                                                // Build & Execution Logs Panel
                                                 <section class="panel">
                                                     <div class="panel-header">
                                                         <h2 class="panel-title">"Build & Execution Logs"</h2>
@@ -831,18 +1257,18 @@ pub fn App() -> impl IntoView {
                                                                 <button
                                                                     type="button"
                                                                     role="tab"
-                                                                    class=move || if log_view_mode.get() == "steps" { "tab-btn tab-active" } else { "tab-btn" }
-                                                                    on:click=move |_| log_view_mode.set("steps".to_string())
-                                                                >
-                                                                    "Structured Steps"
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    role="tab"
                                                                     class=move || if log_view_mode.get() == "raw" { "tab-btn tab-active" } else { "tab-btn" }
                                                                     on:click=move |_| log_view_mode.set("raw".to_string())
                                                                 >
                                                                     "Raw Log Output"
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    role="tab"
+                                                                    class=move || if log_view_mode.get() == "steps" { "tab-btn tab-active" } else { "tab-btn" }
+                                                                    on:click=move |_| log_view_mode.set("steps".to_string())
+                                                                >
+                                                                    "Structured Steps"
                                                                 </button>
                                                             </div>
 
@@ -854,17 +1280,43 @@ pub fn App() -> impl IntoView {
                                                                 prop:value=move || log_search.get()
                                                                 on:input=move |ev| log_search.set(event_target_value(&ev))
                                                             />
+
+                                                            <button
+                                                                type="button"
+                                                                class="btn"
+                                                                on:click=move |_| {
+                                                                    if let Some(win) = web_sys::window() {
+                                                                        let nav = win.navigator();
+                                                                        let clip = nav.clipboard();
+                                                                        let _ = clip.write_text(&selected_job_log.get_untracked());
+                                                                        log_copied.set(true);
+                                                                    }
+                                                                }
+                                                            >
+                                                                {move || if log_copied.get() { "✓ Copied!" } else { "Copy Log" }}
+                                                            </button>
                                                         </div>
                                                     </div>
 
                                                     {move || {
-                                                        if log_loading.get() && selected_job_log.get().is_empty() {
+                                                        let raw_txt = selected_job_log.get();
+                                                        if log_loading.get() && raw_txt.is_empty() {
                                                             return view! {
                                                                 <div class="queue-empty-list">"Loading execution log..."</div>
                                                             }.into_any();
                                                         }
 
+                                                        if raw_txt.is_empty() {
+                                                            return view! {
+                                                                <div class="queue-empty-list">
+                                                                    "No execution logs recorded yet for this job."
+                                                                </div>
+                                                            }.into_any();
+                                                        }
+
                                                         let filter_q = log_search.get().trim().to_ascii_lowercase();
+                                                        let parsed_log = parse_job_log(&raw_txt);
+
                                                         if log_view_mode.get() == "steps" && !parsed_log.steps.is_empty() {
                                                             let steps = parsed_log.steps.clone();
                                                             let pre = parsed_log.pre_step_output.clone();
@@ -914,7 +1366,7 @@ pub fn App() -> impl IntoView {
                                                                 </div>
                                                             }.into_any()
                                                         } else {
-                                                            let raw_txt = selected_job_log.get();
+                                                            let line_count = raw_txt.lines().count();
                                                             let filtered = if filter_q.is_empty() {
                                                                 raw_txt
                                                             } else {
@@ -925,7 +1377,12 @@ pub fn App() -> impl IntoView {
                                                                     .join("\n")
                                                             };
                                                             view! {
-                                                                <pre class="log-pre">{filtered}</pre>
+                                                                <div>
+                                                                    <div style="display: flex; justify-content: flex-end; padding: 4px 16px; font-size: 11px; color: #8b949e;">
+                                                                        {format!("{} lines", line_count)}
+                                                                    </div>
+                                                                    <pre class="log-pre" style="max-height: 650px; overflow-y: auto; background: #0d1117; color: #c9d1d9; padding: 16px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-all;">{filtered}</pre>
+                                                                </div>
                                                             }.into_any()
                                                         }
                                                     }}

@@ -157,6 +157,69 @@ pub fn parse_job_log(raw: &str) -> ParsedLog {
         i += 1;
     }
 
+    // If no legacy steps were found, parse distributed runner logs:
+    // Format: "2026-10-24T12:31:24.898184+00:00 [rubicon] [clippy-check] [stderr] Updating crates.io index"
+    if steps.is_empty() {
+        use std::collections::BTreeMap;
+        let mut stages_map: BTreeMap<String, (String, String, Vec<String>, StepStatus)> =
+            BTreeMap::new();
+        let mut stage_order: Vec<String> = Vec::new();
+
+        for line in raw.lines() {
+            let parts: Vec<&str> = line.splitn(5, ' ').collect();
+            if parts.len() == 5
+                && parts[1].starts_with('[')
+                && parts[1].ends_with(']')
+                && parts[2].starts_with('[')
+                && parts[2].ends_with(']')
+            {
+                let timestamp = parts[0];
+                let node_id = &parts[1][1..parts[1].len() - 1];
+                let stage_id = &parts[2][1..parts[2].len() - 1];
+                let content = parts[4];
+
+                if !stages_map.contains_key(stage_id) {
+                    stage_order.push(stage_id.to_string());
+                    stages_map.insert(
+                        stage_id.to_string(),
+                        (
+                            node_id.to_string(),
+                            timestamp.to_string(),
+                            Vec::new(),
+                            StepStatus::Passed,
+                        ),
+                    );
+                }
+
+                let entry = stages_map.get_mut(stage_id).unwrap();
+                if content.contains("error:")
+                    || content.contains("FAILED")
+                    || content.contains("Diff in")
+                {
+                    entry.3 = StepStatus::Failed;
+                }
+                entry.2.push(line.to_string());
+            }
+        }
+
+        if !stage_order.is_empty() {
+            let total = stage_order.len();
+            for (idx, stage_id) in stage_order.iter().enumerate() {
+                if let Some((node_id, started_at, lines, status)) = stages_map.remove(stage_id) {
+                    steps.push(ParsedStep {
+                        number: idx + 1,
+                        total,
+                        name: stage_id.clone(),
+                        command: format!("Host: {} (Distributed Stage)", node_id),
+                        started_at,
+                        status,
+                        output: lines.join("\n"),
+                    });
+                }
+            }
+        }
+    }
+
     ParsedLog {
         pre_step_output: pre_lines.join("\n").trim().to_string(),
         steps,
@@ -210,5 +273,17 @@ Checking k3-core v0.1.0
         assert_eq!(parsed.steps[1].number, 2);
         assert_eq!(parsed.steps[1].status, StepStatus::Failed);
         assert!(parsed.steps[1].output.contains("Checking k3-core v0.1.0"));
+    }
+
+    #[test]
+    fn test_parse_distributed_cluster_log() {
+        let sample = "2026-10-24T12:31:24.898184+00:00 [rubicon] [clippy-check] [stderr] Updating crates.io index\n2026-10-24T12:31:26.491124+00:00 [rubicon] [clippy-check] [stderr] Locking packages\n2026-10-24T12:39:19.894462+00:00 [pey-wail-deu] [native-k3] [stdout] running 4 tests\n2026-10-24T12:39:19.903154+00:00 [pey-wail-deu] [native-k3] [stdout] test result: ok. 4 passed\n";
+        let parsed = parse_job_log(sample);
+        assert_eq!(parsed.steps.len(), 2);
+        assert_eq!(parsed.steps[0].name, "clippy-check");
+        assert!(parsed.steps[0].command.contains("rubicon"));
+        assert_eq!(parsed.steps[1].name, "native-k3");
+        assert!(parsed.steps[1].command.contains("pey-wail-deu"));
+        assert_eq!(parsed.steps[1].status, StepStatus::Passed);
     }
 }
