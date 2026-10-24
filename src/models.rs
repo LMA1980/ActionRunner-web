@@ -74,6 +74,8 @@ pub enum StageStatus {
     Running {
         node_id: String,
         started_at: DateTime<Utc>,
+        #[serde(default)]
+        pid: Option<u32>,
     },
     Completed {
         duration_secs: u64,
