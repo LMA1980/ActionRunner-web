@@ -150,7 +150,7 @@ body {
 
 /* Main Content Container */
 .main-container {
-  max-width: 1240px;
+  max-width: 1358px;
   width: 100%;
   margin: 0 auto;
   padding: 20px 24px 48px;
@@ -188,11 +188,25 @@ body {
   margin: 4px 0 2px;
 }
 
-.kpi-amber { color: #e3b341; }
-.kpi-blue { color: var(--accent-blue); }
-.kpi-green { color: #56d364; }
-.kpi-red { color: #f85149; }
-.kpi-muted { color: var(--text-muted); }
+.kpi-amber {
+  color: #e3b341;
+}
+
+.kpi-blue {
+  color: var(--accent-blue);
+}
+
+.kpi-green {
+  color: #56d364;
+}
+
+.kpi-red {
+  color: #f85149;
+}
+
+.kpi-muted {
+  color: var(--text-muted);
+}
 
 .kpi-sub {
   font-size: 11px;
@@ -326,11 +340,26 @@ body {
   border-radius: 999px;
 }
 
-.status-passing { background-color: var(--status-green); }
-.status-failing { background-color: var(--status-red); }
-.status-running { background-color: var(--status-amber); }
-.status-queued { background-color: var(--status-amber); }
-.status-skipped { background-color: var(--status-grey); color: var(--text-secondary); }
+.status-passing {
+  background-color: var(--status-green);
+}
+
+.status-failing {
+  background-color: var(--status-red);
+}
+
+.status-running {
+  background-color: var(--status-amber);
+}
+
+.status-queued {
+  background-color: var(--status-amber);
+}
+
+.status-skipped {
+  background-color: var(--status-grey);
+  color: var(--text-secondary);
+}
 
 .score-pill {
   display: inline-block;
@@ -341,9 +370,17 @@ body {
   border-radius: 999px;
 }
 
-.score-high { background-color: var(--status-green); }
-.score-med { background-color: var(--status-amber); }
-.score-low { background-color: var(--status-red); }
+.score-high {
+  background-color: var(--status-green);
+}
+
+.score-med {
+  background-color: var(--status-amber);
+}
+
+.score-low {
+  background-color: var(--status-red);
+}
 
 .branch-pill {
   background-color: #21262d;
@@ -814,9 +851,17 @@ body {
   color: #ffffff;
 }
 
-.step-passed { background-color: var(--status-green); }
-.step-failed { background-color: var(--status-red); }
-.step-running { background-color: var(--status-amber); }
+.step-passed {
+  background-color: var(--status-green);
+}
+
+.step-failed {
+  background-color: var(--status-red);
+}
+
+.step-running {
+  background-color: var(--status-amber);
+}
 
 .step-title {
   font-weight: 600;
@@ -937,7 +982,8 @@ body {
 
   .select-input {
     width: 100%;
-    font-size: 16px; /* Prevents iOS Safari auto-zoom on focus */
+    font-size: 16px;
+    /* Prevents iOS Safari auto-zoom on focus */
     padding: 8px 32px 8px 12px;
     min-height: 38px;
     box-sizing: border-box;
@@ -965,7 +1011,8 @@ body {
   .search-input {
     width: 100%;
     min-width: 0;
-    font-size: 16px; /* Prevents iOS Safari auto-zoom on focus */
+    font-size: 16px;
+    /* Prevents iOS Safari auto-zoom on focus */
     padding: 8px 12px;
     min-height: 38px;
     box-sizing: border-box;
@@ -1058,6 +1105,7 @@ body {
 }
 
 @media (max-width: 640px) {
+
   /* Short labels on phone viewports so all 6 status tabs fit across screen */
   .tab-label-full {
     display: none;
