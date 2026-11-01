@@ -322,6 +322,10 @@ pub struct JobRecord {
     pub sandbox_telemetry: Vec<SandboxTelemetryRecord>,
     #[serde(default)]
     pub security_violations: Vec<SecurityGrantViolationRecord>,
+    #[serde(default)]
+    pub traceparent: Option<String>,
+    #[serde(default)]
+    pub trace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -604,6 +608,8 @@ mod tests {
             stages: Vec::new(),
             sandbox_telemetry: Vec::new(),
             security_violations: Vec::new(),
+            traceparent: None,
+            trace_id: None,
         }
     }
 

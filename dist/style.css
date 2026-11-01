@@ -1570,4 +1570,349 @@ textarea {
 .ansi-bg-14 { background-color: rgba(86, 212, 221, 0.32); }
 .ansi-bg-15 { background-color: rgba(240, 246, 252, 0.28); }
 
+/* ==========================================================================
+   Milestone 3 Wave 3: Hardware-Stratified Benchmark Sparklines,
+   30-Day Test Flakiness Heatmap & W3C Trace Waterfall (#21-#25)
+   ========================================================================== */
+
+.benchmark-sparkline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.benchmark-sparkline-card {
+  background-color: var(--bg-tile);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sparkline-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sparkline-bench-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.sparkline-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.stratum-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.stratum-a100 {
+  background-color: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
+}
+
+.stratum-x100 {
+  background-color: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+
+.stratum-x86 {
+  background-color: rgba(168, 85, 247, 0.15);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  color: #c084fc;
+}
+
+.delta-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.delta-regressed {
+  background-color: rgba(218, 54, 51, 0.22);
+  border: 1px solid rgba(248, 81, 73, 0.6);
+  color: #ff7b72;
+}
+
+.delta-improved {
+  background-color: rgba(46, 164, 79, 0.18);
+  border: 1px solid rgba(46, 164, 79, 0.45);
+  color: #56d364;
+}
+
+.delta-neutral {
+  background-color: #21262d;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.sparkline-svg-wrap {
+  background-color: #090d13;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+
+.sparkline-svg {
+  width: 100%;
+  height: 56px;
+  display: block;
+}
+
+.sparkline-card-footer {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* 30-Day Test Flakiness Heatmap (#24) */
+.flakiness-heatmap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.flakiness-heatmap-row {
+  background-color: var(--bg-tile);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.flakiness-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.flakiness-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.flip-flop-pill {
+  background-color: #21262d;
+  border: 1px solid var(--border-color);
+  color: #e3b341;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.heatmap-cells-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: max-content;
+}
+
+.heatmap-cell {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.heatmap-pass {
+  background-color: rgba(46, 164, 79, 0.25);
+  border: 1px solid rgba(46, 164, 79, 0.5);
+  color: #56d364;
+}
+
+.heatmap-fail {
+  background-color: rgba(218, 54, 51, 0.3);
+  border: 1px solid rgba(248, 81, 73, 0.7);
+  color: #ff7b72;
+}
+
+.heatmap-flaky {
+  background-color: rgba(219, 171, 9, 0.3);
+  border: 1px solid rgba(219, 171, 9, 0.75);
+  color: #e3b341;
+}
+
+.heatmap-empty {
+  background-color: #0d1117;
+  border: 1px solid var(--border-subtle);
+  color: #484f58;
+}
+
+/* Distributed W3C Trace Waterfall (#25) */
+.waterfall-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.waterfall-span-row {
+  background-color: var(--bg-tile);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1.3fr) minmax(160px, 2fr) auto;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.waterfall-span-row:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--accent-blue);
+}
+
+.waterfall-span-selected {
+  border-color: var(--accent-blue);
+  background-color: rgba(88, 166, 255, 0.08);
+}
+
+.waterfall-span-meta,
+.waterfall-span-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.waterfall-span-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.waterfall-timeline-track {
+  position: relative;
+  height: 12px;
+  background-color: #090d13;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.waterfall-timeline-bar {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 999px;
+  min-width: 6px;
+}
+
+.waterfall-dur-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.trace-svc-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.trace-svc-controller {
+  background-color: rgba(88, 166, 255, 0.18);
+  border: 1px solid rgba(88, 166, 255, 0.45);
+  color: #58a6ff;
+}
+
+.trace-svc-worker {
+  background-color: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
+}
+
+.trace-svc-muregist {
+  background-color: rgba(46, 164, 79, 0.18);
+  border: 1px solid rgba(46, 164, 79, 0.45);
+  color: #56d364;
+}
+
+.trace-svc-muconde {
+  background-color: rgba(168, 85, 247, 0.18);
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  color: #c084fc;
+}
+
+.trace-svc-other {
+  background-color: #21262d;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.correlated-log-drawer {
+  margin-top: 12px;
+  background-color: #090d13;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 8px;
+}
+
+.drawer-title-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.drawer-logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+
+@media (max-width: 768px) {
+  .benchmark-sparkline-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .waterfall-span-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
+
 

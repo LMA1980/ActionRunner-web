@@ -4,12 +4,17 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::ansi::{parse_console_line, strip_ansi_codes};
+use crate::components::benchmark_sparklines::{
+    extract_benchmark_sparklines, extract_test_flakiness_rows, BenchmarkSparklinePanel,
+    TestFlakinessHeatmap,
+};
 use crate::components::canary_pill::{
     fetch_canary_status, CanaryRepositoryStatus, CanaryStatusPill,
 };
 use crate::components::node_locks::{ClusterNodeLocksBar, NodeExclusiveLockBadge};
 use crate::components::pipeline_tree::PipelineTreeView;
 use crate::components::sandbox_telemetry::{extract_sandbox_telemetry, MuIsolationTelemetryPanel};
+use crate::components::trace_waterfall::TraceWaterfallModal;
 use crate::log_parser::{extract_stage_logs, parse_job_log, StepStatus};
 use crate::models::{
     extract_repositories, filter_jobs, is_scrolled_to_bottom, job_card_svg_url,
@@ -688,6 +693,12 @@ pub fn App() -> impl IntoView {
             &search_query.get(),
         )
     };
+    let benchmark_series = Signal::derive(move || {
+        extract_benchmark_sparklines(&jobs_list.get(), selected_job_record.get().as_ref())
+    });
+    let flakiness_rows = Signal::derive(move || {
+        extract_test_flakiness_rows(&jobs_list.get(), selected_job_record.get().as_ref())
+    });
 
     view! {
         <div class="app-shell">
@@ -1320,6 +1331,10 @@ pub fn App() -> impl IntoView {
                                 }}
                             </section>
 
+                            // Hardware-Stratified Benchmark Sparklines & 30-Day Test Flakiness Heatmap (#24)
+                            <BenchmarkSparklinePanel series=benchmark_series />
+                            <TestFlakinessHeatmap rows=flakiness_rows />
+
                             // 3. Current & Past Jobs Explorer
                             <section class="panel">
                                 <div class="panel-header">
@@ -1748,6 +1763,14 @@ pub fn App() -> impl IntoView {
                                                         </div>
                                                     }
                                                 })}
+
+                                                // Distributed W3C Trace Waterfall & Regression Analytics (#24 & #25)
+                                                <TraceWaterfallModal
+                                                    job=rec.clone()
+                                                    raw_log=selected_job_log.into()
+                                                />
+                                                <BenchmarkSparklinePanel series=benchmark_series />
+                                                <TestFlakinessHeatmap rows=flakiness_rows />
 
                                                 // Distributed DAG Pipeline Stages & Host Allocation Panel
                                                 {(!rec.stages.is_empty()).then(|| {
