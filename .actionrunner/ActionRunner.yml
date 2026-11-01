@@ -1,0 +1,98 @@
+version: "3"
+name: "ActionRunner-web 3-Tier Declarative Pipeline: Hygiene, Coverage & WASM32 Build"
+
+tasks:
+  fmt-task:
+    tool: "cargo-fmt"
+    args: ["--all", "--", "--check"]
+    timeout_seconds: 120
+    sandbox_profile: "strict-offline"
+
+  clippy-task:
+    tool: "cargo-clippy"
+    args: ["--workspace", "--all-targets", "--", "-D", "warnings"]
+    timeout_seconds: 600
+    sandbox_profile: "strict-offline"
+
+  audit-task:
+    tool: "cargo-audit"
+    args: []
+    timeout_seconds: 300
+    sandbox_profile: "ci-default"
+
+  coverage-task:
+    tool: "cargo-llvm-cov"
+    args: ["--workspace", "--summary-only"]
+    timeout_seconds: 900
+    sandbox_profile: "ci-default"
+
+  wasm-build-task:
+    tool: "cargo-build"
+    args: ["--target", "wasm32-unknown-unknown", "--release"]
+    timeout_seconds: 900
+    sandbox_profile: "strict-offline"
+
+stages:
+  - id: fmt-check
+    name: "Verify Rust Formatting"
+    tasks: ["fmt-task"]
+    tags: ["fmt"]
+    threads: 2
+    exclusive: false
+    max_concurrent_per_node: 1
+
+  - id: clippy-check
+    name: "Verify Rust Linter & Clippy Rules"
+    tasks: ["clippy-task"]
+    tags: ["clippy"]
+    threads: 4
+    exclusive: false
+    max_concurrent_per_node: 1
+
+  - id: audit-check
+    name: "Verify Dependencies Security Advisories"
+    tasks: ["audit-task"]
+    tags: ["audit"]
+    threads: 2
+    exclusive: false
+    max_concurrent_per_node: 1
+
+  - id: coverage-test
+    name: "Evaluate Test Suite & Line Code Coverage"
+    tasks: ["coverage-task"]
+    depends_on: ["fmt-check", "clippy-check"]
+    tags: ["test"]
+    threads: 4
+    exclusive: false
+    max_concurrent_per_node: 1
+
+  - id: wasm32-build
+    name: "Validate WASM32 Release Compilation"
+    tasks: ["wasm-build-task"]
+    depends_on: ["fmt-check", "clippy-check"]
+    tags: ["build"]
+    threads: 4
+    exclusive: false
+    max_concurrent_per_node: 1
+
+on_action:
+  push:
+    - fmt-check
+    - clippy-check
+    - audit-check
+    - coverage-test
+    - wasm32-build
+  pull_request:
+    - fmt-check
+    - clippy-check
+    - coverage-test
+    - wasm32-build
+  merge:
+    - fmt-check
+    - clippy-check
+    - coverage-test
+    - wasm32-build
+  tag:
+    - fmt-check
+    - clippy-check
+    - wasm32-build

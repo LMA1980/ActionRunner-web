@@ -1,8 +1,4 @@
-mod app;
-mod log_parser;
-mod models;
-
-use app::App;
+use action_runner_web::app::App;
 use leptos::prelude::*;
 
 fn main() {

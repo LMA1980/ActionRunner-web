@@ -2,6 +2,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub fn default_max_concurrent_per_node() -> u32 {
+    1
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Job {
     pub id: String,
@@ -89,6 +93,88 @@ pub enum StageStatus {
     },
 }
 
+/// Tier 3 (`PipelineTaskItem`): Typed `ToolAdapter` invocation inside a pipeline stage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PipelineTaskItem {
+    pub task_id: String,
+    pub tool_name: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub sandbox_profile: Option<String>,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub duration_secs: Option<f64>,
+}
+
+/// `MuIsolation` Sandbox Backend Kind (`KernelSandbox` vs `HypervisorSandbox`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SandboxBackendType {
+    #[default]
+    #[serde(alias = "Kernel", alias = "kernel")]
+    KernelSandbox,
+    #[serde(
+        alias = "Hypervisor",
+        alias = "hypervisor",
+        alias = "Kvm",
+        alias = "kvm"
+    )]
+    HypervisorSandbox,
+}
+
+impl SandboxBackendType {
+    pub fn label(&self) -> &'static str {
+        match self {
+            SandboxBackendType::KernelSandbox => "KernelSandbox (Landlock + cgroupv2 + seccomp)",
+            SandboxBackendType::HypervisorSandbox => "HypervisorSandbox (/dev/kvm Guest VM)",
+        }
+    }
+
+    pub fn short_label(&self) -> &'static str {
+        match self {
+            SandboxBackendType::KernelSandbox => "KernelSandbox",
+            SandboxBackendType::HypervisorSandbox => "HypervisorSandbox",
+        }
+    }
+
+    pub fn css_class(&self) -> &'static str {
+        match self {
+            SandboxBackendType::KernelSandbox => "sandbox-badge sandbox-kernel",
+            SandboxBackendType::HypervisorSandbox => "sandbox-badge sandbox-kvm",
+        }
+    }
+}
+
+/// Active `MuIsolation` sandbox telemetry for a pipeline stage (`#20`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxTelemetryRecord {
+    pub stage_id: String,
+    #[serde(default)]
+    pub node_id: Option<String>,
+    #[serde(default)]
+    pub backend: SandboxBackendType,
+    pub profile_name: String,
+    pub memlock_limit_kb: u64,
+    #[serde(default)]
+    pub set_ai_thread_active: bool,
+    #[serde(default)]
+    pub max_pids: u32,
+    #[serde(default)]
+    pub network_egress_cidrs: Vec<String>,
+}
+
+/// Fail-closed `SecurityGrantDenied` privilege violation alert record (`#20`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecurityGrantViolationRecord {
+    pub stage_id: String,
+    pub violated_layer: String,
+    pub field: String,
+    pub requested_value: String,
+    pub ceiling_value: String,
+    pub timestamp: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StageRecord {
     pub id: String,
@@ -100,6 +186,14 @@ pub struct StageRecord {
     pub status: StageStatus,
     #[serde(default)]
     pub assigned_node: Option<String>,
+    #[serde(default)]
+    pub exclusive: bool,
+    #[serde(default = "default_max_concurrent_per_node")]
+    pub max_concurrent_per_node: u32,
+    #[serde(default)]
+    pub tasks: Vec<PipelineTaskItem>,
+    #[serde(default)]
+    pub sandbox_telemetry: Option<SandboxTelemetryRecord>,
 }
 
 impl StageRecord {
@@ -115,11 +209,20 @@ impl StageRecord {
         }
     }
 
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self.status,
+            StageStatus::Assigned { .. } | StageStatus::Running { .. }
+        )
+    }
+
     pub fn node_display(&self) -> (&'static str, &'static str) {
         match self.execution_node() {
-            Some("entrance") => ("🖥️ entrance (N100)", "node-pill node-n100"),
-            Some("rubicon") => ("⚡ rubicon (Xeon)", "node-pill node-xeon"),
-            Some("pey-wail-deu") => ("🔬 pey-wail-deu (K3)", "node-pill node-k3"),
+            Some("control-node") => ("🖥️ control-node (N100)", "node-pill node-n100"),
+            Some("storage-node") => ("⚡ storage-node (Xeon)", "node-pill node-xeon"),
+            Some("worker-node") | Some("worker-riscv64") => {
+                ("🔬 worker-node (K3)", "node-pill node-k3")
+            }
             Some(_) => ("⚙️ Remote Worker", "node-pill node-other"),
             None => ("⏳ Awaiting Node", "node-pill node-pending"),
         }
@@ -127,9 +230,9 @@ impl StageRecord {
 
     pub fn compact_node_display(&self) -> (&'static str, &'static str) {
         match self.execution_node() {
-            Some("entrance") => ("🖥️ entrance", "node-pill node-n100"),
-            Some("rubicon") => ("⚡ rubicon", "node-pill node-xeon"),
-            Some("pey-wail-deu") => ("🔬 pey-wail-deu", "node-pill node-k3"),
+            Some("control-node") => ("🖥️ control-node", "node-pill node-n100"),
+            Some("storage-node") => ("⚡ storage-node", "node-pill node-xeon"),
+            Some("worker-node") | Some("worker-riscv64") => ("🔬 worker-node", "node-pill node-k3"),
             Some(_) => ("⚙️ remote", "node-pill node-other"),
             None => ("⏳ awaiting", "node-pill node-pending"),
         }
@@ -144,6 +247,12 @@ pub struct ClusterNodeView {
     pub tags: Vec<String>,
     pub max_slots: u32,
     pub active_slots: u32,
+    #[serde(default)]
+    pub max_concurrent_per_node: Option<u32>,
+    #[serde(default)]
+    pub exclusive_locked: bool,
+    #[serde(default)]
+    pub exclusive_stage_id: Option<String>,
     pub ram_total_mb: u64,
     pub ram_used_mb: u64,
     pub cpu_load_pct: f32,
@@ -151,6 +260,48 @@ pub struct ClusterNodeView {
     pub toolchains: Vec<String>,
     pub last_seen_secs_ago: u64,
     pub is_online: bool,
+}
+
+impl ClusterNodeView {
+    /// Returns the effective `max_concurrent_per_node` ceiling (defaults to `max_slots.max(1)`).
+    pub fn effective_max_concurrent(&self) -> u32 {
+        self.max_concurrent_per_node
+            .unwrap_or_else(|| self.max_slots.max(1))
+    }
+
+    /// Resolves whether the node currently holds an exclusive stage lock, either from
+    /// the controller's `exclusive_locked` field or inferred from an active `exclusive: true` stage.
+    pub fn resolve_exclusive_lock(&self, jobs: &[JobRecord]) -> (bool, Option<String>, u32) {
+        let max_conc = self.effective_max_concurrent();
+        if self.exclusive_locked {
+            let inferred_stage = self.exclusive_stage_id.clone().or_else(|| {
+                for job in jobs {
+                    for stage in &job.stages {
+                        if stage.execution_node() == Some(self.node_id.as_str())
+                            && stage.is_active()
+                        {
+                            return Some(stage.id.clone());
+                        }
+                    }
+                }
+                None
+            });
+            return (true, inferred_stage, max_conc);
+        }
+
+        for job in jobs {
+            for stage in &job.stages {
+                if stage.execution_node() == Some(self.node_id.as_str())
+                    && stage.is_active()
+                    && stage.exclusive
+                {
+                    return (true, Some(stage.id.clone()), max_conc);
+                }
+            }
+        }
+
+        (false, None, max_conc)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -167,6 +318,10 @@ pub struct JobRecord {
     pub elapsed_secs: Option<u64>,
     #[serde(default)]
     pub stages: Vec<StageRecord>,
+    #[serde(default)]
+    pub sandbox_telemetry: Vec<SandboxTelemetryRecord>,
+    #[serde(default)]
+    pub security_violations: Vec<SecurityGrantViolationRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -447,6 +602,8 @@ mod tests {
             queue_position: None,
             elapsed_secs: None,
             stages: Vec::new(),
+            sandbox_telemetry: Vec::new(),
+            security_violations: Vec::new(),
         }
     }
 
@@ -535,20 +692,24 @@ mod tests {
             depends_on: vec![],
             status: StageStatus::Pending,
             assigned_node: None,
+            exclusive: false,
+            max_concurrent_per_node: 1,
+            tasks: vec![],
+            sandbox_telemetry: None,
         };
 
         assert_eq!(stage.compact_node_display().0, "⏳ awaiting");
 
-        stage.assigned_node = Some("entrance".to_string());
-        assert_eq!(stage.compact_node_display().0, "🖥️ entrance");
+        stage.assigned_node = Some("control-node".to_string());
+        assert_eq!(stage.compact_node_display().0, "🖥️ control-node");
         assert_eq!(stage.compact_node_display().1, "node-pill node-n100");
 
-        stage.assigned_node = Some("rubicon".to_string());
-        assert_eq!(stage.compact_node_display().0, "⚡ rubicon");
+        stage.assigned_node = Some("storage-node".to_string());
+        assert_eq!(stage.compact_node_display().0, "⚡ storage-node");
         assert_eq!(stage.compact_node_display().1, "node-pill node-xeon");
 
-        stage.assigned_node = Some("pey-wail-deu".to_string());
-        assert_eq!(stage.compact_node_display().0, "🔬 pey-wail-deu");
+        stage.assigned_node = Some("worker-node".to_string());
+        assert_eq!(stage.compact_node_display().0, "🔬 worker-node");
         assert_eq!(stage.compact_node_display().1, "node-pill node-k3");
     }
 

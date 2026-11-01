@@ -158,7 +158,7 @@ pub fn parse_job_log(raw: &str) -> ParsedLog {
     }
 
     // If no legacy steps were found, parse distributed runner logs:
-    // Format: "2026-10-24T12:31:24.898184+00:00 [rubicon] [clippy-check] [stderr] Updating crates.io index"
+    // Format: "2026-10-24T12:31:24.898184+00:00 [storage-node] [clippy-check] [stderr] Updating crates.io index"
     if steps.is_empty() {
         pre_lines.clear();
         use std::collections::BTreeMap;
@@ -317,22 +317,22 @@ Checking k3-core v0.1.0
 
     #[test]
     fn test_parse_distributed_cluster_log() {
-        let sample = "2026-10-24T12:31:24.898184+00:00 [rubicon] [clippy-check] [stderr] Updating crates.io index\n2026-10-24T12:31:26.491124+00:00 [rubicon] [clippy-check] [stderr] Locking packages\n2026-10-24T12:39:19.894462+00:00 [pey-wail-deu] [native-k3] [stdout] running 4 tests\n2026-10-24T12:39:19.903154+00:00 [pey-wail-deu] [native-k3] [stdout] test result: ok. 4 passed\n";
+        let sample = "2026-10-24T12:31:24.898184+00:00 [storage-node] [clippy-check] [stderr] Updating crates.io index\n2026-10-24T12:31:26.491124+00:00 [storage-node] [clippy-check] [stderr] Locking packages\n2026-10-24T12:39:19.894462+00:00 [worker-node] [native-k3] [stdout] running 4 tests\n2026-10-24T12:39:19.903154+00:00 [worker-node] [native-k3] [stdout] test result: ok. 4 passed\n";
         let parsed = parse_job_log(sample);
         assert_eq!(parsed.steps.len(), 2);
         assert_eq!(parsed.steps[0].name, "clippy-check");
-        assert!(parsed.steps[0].command.contains("rubicon"));
+        assert!(parsed.steps[0].command.contains("storage-node"));
         assert_eq!(parsed.steps[1].name, "native-k3");
         assert_eq!(
             parsed.steps[1].command,
-            "Host: pey-wail-deu (Distributed Stage)"
+            "Host: worker-node (Distributed Stage)"
         );
         assert_eq!(parsed.steps[1].status, StepStatus::Passed);
     }
 
     #[test]
     fn test_extract_stage_logs_and_step0() {
-        let sample = "Job log initializing\n2026-10-24T12:00:00+00:00 [pey-wail-deu] [step-0] [stdout] Git submodule updated\n2026-10-24T12:00:01+00:00 [pey-wail-deu] [step-2] [stdout] Running clippy\n";
+        let sample = "Job log initializing\n2026-10-24T12:00:00+00:00 [worker-node] [step-0] [stdout] Git submodule updated\n2026-10-24T12:00:01+00:00 [worker-node] [step-2] [stdout] Running clippy\n";
         let (step0, stage_logs) = extract_stage_logs(sample);
         assert_eq!(step0.len(), 2);
         assert!(step0[0].contains("Job log initializing"));
