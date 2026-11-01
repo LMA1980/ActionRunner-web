@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ansi::strip_ansi_codes;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StepStatus {
     Passed,
@@ -111,12 +113,13 @@ pub fn parse_job_log(raw: &str) -> ParsedLog {
                         break;
                     }
 
-                    if bline.contains("[ActionRunner-rs] Step '")
-                        && bline.contains("completed successfully.")
+                    let clean_bline = strip_ansi_codes(bline);
+                    if clean_bline.contains("[ActionRunner-rs] Step '")
+                        && clean_bline.contains("completed successfully.")
                     {
                         status = StepStatus::Passed;
-                    } else if bline.contains("[ActionRunner-rs ERROR] Step '") {
-                        if bline.contains("timed out") {
+                    } else if clean_bline.contains("[ActionRunner-rs ERROR] Step '") {
+                        if clean_bline.contains("timed out") {
                             status = StepStatus::TimedOut;
                         } else {
                             status = StepStatus::Failed;
@@ -198,9 +201,10 @@ pub fn parse_job_log(raw: &str) -> ParsedLog {
                 }
 
                 let entry = stages_map.get_mut(stage_id).unwrap();
-                if content.contains("error:")
-                    || content.contains("FAILED")
-                    || content.contains("Diff in")
+                let clean_content = strip_ansi_codes(content);
+                if clean_content.contains("error:")
+                    || clean_content.contains("FAILED")
+                    || clean_content.contains("Diff in")
                 {
                     entry.3 = StepStatus::Failed;
                 }
@@ -342,5 +346,14 @@ Checking k3-core v0.1.0
         let s2 = stage_logs.get("step-2").expect("step-2 present");
         assert_eq!(s2.len(), 1);
         assert!(s2[0].contains("Running clippy"));
+    }
+
+    #[test]
+    fn test_parse_distributed_log_detects_ansi_colored_errors() {
+        let sample = "2026-11-01T09:21:02.585185+00:00 [worker-riscv64] [clippy-check] [stderr] [1m[31merror[0m: unused variable `x`\n";
+        let parsed = parse_job_log(sample);
+        assert_eq!(parsed.steps.len(), 1);
+        assert_eq!(parsed.steps[0].name, "clippy-check");
+        assert_eq!(parsed.steps[0].status, StepStatus::Failed);
     }
 }
