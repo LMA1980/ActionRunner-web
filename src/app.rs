@@ -3,6 +3,7 @@ use gloo_net::http::Request;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+use crate::ansi::{parse_console_line, strip_ansi_codes};
 use crate::components::canary_pill::{
     fetch_canary_status, CanaryRepositoryStatus, CanaryStatusPill,
 };
@@ -15,6 +16,62 @@ use crate::models::{
     job_submodule_card_svg_url, score_pill_class, short_branch, short_sha, ClusterNodeView,
     JobRecord, JobStatus, JobsListResponse, QueueSnapshot, StageStatus,
 };
+
+fn render_console_log_view(raw: &str) -> impl IntoView {
+    let lines: Vec<String> = raw.lines().map(str::to_string).collect();
+    let total = lines.len();
+    lines
+        .into_iter()
+        .enumerate()
+        .map(move |(idx, line)| {
+            let parsed = parse_console_line(&line);
+            let has_newline = idx + 1 < total;
+            view! {
+                <span class="log-line">
+                    {parsed.prefix.map(|pref| {
+                        let stream_view = pref.stream_tag.map(|st| {
+                            let cls = if st == "[stderr]" {
+                                "log-prefix-stderr"
+                            } else {
+                                "log-prefix-stdout"
+                            };
+                            view! {
+                                <span class=cls>{st}</span>
+                                " "
+                            }
+                        });
+                        view! {
+                            <span class="log-prefix-ts">{pref.timestamp}</span>
+                            " "
+                            <span class="log-prefix-node">{pref.node_id}</span>
+                            " "
+                            <span class="log-prefix-stage">{pref.stage_id}</span>
+                            " "
+                            {stream_view}
+                        }
+                    })}
+                    {parsed
+                        .spans
+                        .into_iter()
+                        .map(|span| {
+                            if span.style.is_empty() {
+                                view! { <span>{span.text}</span> }.into_any()
+                            } else {
+                                let cls = span.style.css_class();
+                                let inline = span.style.inline_style().unwrap_or_default();
+                                view! {
+                                    <span class=cls style=inline>{span.text}</span>
+                                }
+                                .into_any()
+                            }
+                        })
+                        .collect_view()}
+                    {if has_newline { "\n" } else { "" }}
+                </span>
+            }
+        })
+        .collect_view()
+}
 
 fn default_api_base() -> String {
     if let Some(win) = web_sys::window() {
@@ -242,7 +299,8 @@ pub fn App() -> impl IntoView {
     let log_loading = RwSignal::new(false);
     let log_view_mode = RwSignal::new(String::from("raw")); // "raw" or "steps"
     let log_search = RwSignal::new(String::new());
-    let log_copied = RwSignal::new(false);
+    let log_clean_copied = RwSignal::new(false);
+    let log_raw_copied = RwSignal::new(false);
     let follow_tail = RwSignal::new(true);
     let last_scroll_top = RwSignal::new(0i32);
     let is_programmatic_scroll = StoredValue::new(false);
@@ -1816,16 +1874,36 @@ pub fn App() -> impl IntoView {
                                                             <button
                                                                 type="button"
                                                                 class="btn"
+                                                                title="Copy plain text log with ANSI escape codes stripped"
+                                                                on:click=move |_| {
+                                                                    if let Some(win) = web_sys::window() {
+                                                                        let nav = win.navigator();
+                                                                        let clip = nav.clipboard();
+                                                                        let clean = strip_ansi_codes(&selected_job_log.get_untracked());
+                                                                        let _ = clip.write_text(&clean);
+                                                                        log_clean_copied.set(true);
+                                                                        log_raw_copied.set(false);
+                                                                    }
+                                                                }
+                                                            >
+                                                                {move || if log_clean_copied.get() { "✓ Clean Copied!" } else { "Copy Clean Log" }}
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                class="btn"
+                                                                title="Copy raw log preserving original ANSI escape sequences"
                                                                 on:click=move |_| {
                                                                     if let Some(win) = web_sys::window() {
                                                                         let nav = win.navigator();
                                                                         let clip = nav.clipboard();
                                                                         let _ = clip.write_text(&selected_job_log.get_untracked());
-                                                                        log_copied.set(true);
+                                                                        log_raw_copied.set(true);
+                                                                        log_clean_copied.set(false);
                                                                     }
                                                                 }
                                                             >
-                                                                {move || if log_copied.get() { "✓ Copied!" } else { "Copy Log" }}
+                                                                {move || if log_raw_copied.get() { "✓ Raw Copied!" } else { "Copy Raw ANSI" }}
                                                             </button>
                                                         </div>
                                                     </div>
@@ -1857,7 +1935,7 @@ pub fn App() -> impl IntoView {
                                                                 } else {
                                                                     step0_lines
                                                                         .iter()
-                                                                        .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
+                                                                        .filter(|l| strip_ansi_codes(l).to_ascii_lowercase().contains(&filter_q))
                                                                         .cloned()
                                                                         .collect::<Vec<_>>()
                                                                         .join("\n")
@@ -1882,7 +1960,7 @@ pub fn App() -> impl IntoView {
                                                                                 <span class="step-title">{format!("Step [0/{}]: Workspace Clone, Reset & Submodule Sync", total_dag_stages)}</span>
                                                                                 <code class="step-cmd mono">"git clone & submodule update"</code>
                                                                             </summary>
-                                                                            <pre class="log-pre">{step0_out}</pre>
+                                                                            <pre class="log-pre">{render_console_log_view(&step0_out)}</pre>
                                                                         </details>
 
                                                                         {dag_stages.iter().enumerate().map(|(idx, stage)| {
@@ -1947,7 +2025,7 @@ pub fn App() -> impl IntoView {
                                                                                     } else {
                                                                                         lines
                                                                                             .iter()
-                                                                                            .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
+                                                                                            .filter(|l| strip_ansi_codes(l).to_ascii_lowercase().contains(&filter_q))
                                                                                             .cloned()
                                                                                             .collect::<Vec<_>>()
                                                                                             .join("\n")
@@ -1986,7 +2064,7 @@ pub fn App() -> impl IntoView {
                                                                                         <span class="step-title">{header_title}</span>
                                                                                         <code class="step-cmd mono">{cmd_str}</code>
                                                                                     </summary>
-                                                                                    <pre class="log-pre">{out}</pre>
+                                                                                    <pre class="log-pre">{render_console_log_view(&out)}</pre>
                                                                                 </details>
                                                                             }
                                                                         }).collect_view()}
@@ -2022,7 +2100,7 @@ pub fn App() -> impl IntoView {
                                                                                     <span class="step-badge step-passed">"✓ GIT SYNC"</span>
                                                                                     <span class="step-title">"Workspace Clone, Reset & Submodule Sync"</span>
                                                                                 </summary>
-                                                                                <pre class="log-pre">{pre}</pre>
+                                                                                <pre class="log-pre">{render_console_log_view(&pre)}</pre>
                                                                             </details>
                                                                         })}
 
@@ -2037,7 +2115,7 @@ pub fn App() -> impl IntoView {
                                                                             } else {
                                                                                 step.output
                                                                                     .lines()
-                                                                                    .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
+                                                                                    .filter(|l| strip_ansi_codes(l).to_ascii_lowercase().contains(&filter_q))
                                                                                     .collect::<Vec<_>>()
                                                                                     .join("\n")
                                                                             };
@@ -2048,13 +2126,13 @@ pub fn App() -> impl IntoView {
                                                                                         <span class="step-title">{header_title}</span>
                                                                                         <code class="step-cmd mono">{cmd_str}</code>
                                                                                     </summary>
-                                                                                    <pre class="log-pre">{out}</pre>
+                                                                                    <pre class="log-pre">{render_console_log_view(&out)}</pre>
                                                                                 </details>
                                                                             }
                                                                         }).collect_view()}
 
                                                                         {(!post.is_empty()).then(|| view! {
-                                                                            <pre class="log-pre" style="margin-top: 8px;">{post}</pre>
+                                                                            <pre class="log-pre" style="margin-top: 8px;">{render_console_log_view(&post)}</pre>
                                                                         })}
                                                                     </div>
                                                                 }.into_any()
@@ -2091,7 +2169,7 @@ pub fn App() -> impl IntoView {
                                                                     } else {
                                                                         let filtered_count = raw_txt
                                                                             .lines()
-                                                                            .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
+                                                                            .filter(|l| strip_ansi_codes(l).to_ascii_lowercase().contains(&filter_q))
                                                                             .count();
                                                                         format!("{} / {} lines", filtered_count, line_count)
                                                                     }
@@ -2107,21 +2185,22 @@ pub fn App() -> impl IntoView {
                                                             {move || {
                                                                 let raw_txt = selected_job_log.get();
                                                                 if log_loading.get() && raw_txt.is_empty() {
-                                                                    return "Loading execution log...".to_string();
+                                                                    return view! { <span>"Loading execution log..."</span> }.into_any();
                                                                 }
                                                                 if raw_txt.is_empty() {
-                                                                    return "No execution logs recorded yet for this job.".to_string();
+                                                                    return view! { <span>"No execution logs recorded yet for this job."</span> }.into_any();
                                                                 }
                                                                 let filter_q = log_search.get().trim().to_ascii_lowercase();
-                                                                if filter_q.is_empty() {
+                                                                let filtered_txt = if filter_q.is_empty() {
                                                                     raw_txt
                                                                 } else {
                                                                     raw_txt
                                                                         .lines()
-                                                                        .filter(|l| l.to_ascii_lowercase().contains(&filter_q))
+                                                                        .filter(|l| strip_ansi_codes(l).to_ascii_lowercase().contains(&filter_q))
                                                                         .collect::<Vec<_>>()
                                                                         .join("\n")
-                                                                }
+                                                                };
+                                                                render_console_log_view(&filtered_txt).into_any()
                                                             }}
                                                         </pre>
                                                     </div>
