@@ -205,6 +205,8 @@ mod tests {
             }],
             sandbox_telemetry: vec![],
             security_violations: vec![],
+            traceparent: None,
+            trace_id: None,
         };
 
         let (inferred_locked, inferred_stage, _) =
