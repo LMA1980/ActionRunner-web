@@ -3,6 +3,12 @@ use gloo_net::http::Request;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+use crate::components::canary_pill::{
+    fetch_canary_status, CanaryRepositoryStatus, CanaryStatusPill,
+};
+use crate::components::node_locks::{ClusterNodeLocksBar, NodeExclusiveLockBadge};
+use crate::components::pipeline_tree::PipelineTreeView;
+use crate::components::sandbox_telemetry::{extract_sandbox_telemetry, MuIsolationTelemetryPanel};
 use crate::log_parser::{extract_stage_logs, parse_job_log, StepStatus};
 use crate::models::{
     extract_repositories, filter_jobs, is_scrolled_to_bottom, job_card_svg_url,
@@ -216,6 +222,7 @@ pub fn App() -> impl IntoView {
     let queue_snap = RwSignal::new(None::<QueueSnapshot>);
     let jobs_list = RwSignal::new(Vec::<JobRecord>::new());
     let cluster_nodes = RwSignal::new(Vec::<ClusterNodeView>::new());
+    let canary_status = RwSignal::new(CanaryRepositoryStatus::default());
     let error_banner = RwSignal::new(None::<String>);
     let last_updated = RwSignal::new(String::from("Connecting..."));
     let auto_refresh = RwSignal::new(true);
@@ -287,6 +294,9 @@ pub fn App() -> impl IntoView {
         let base = api_base.get_untracked();
         let current_job_id = selected_job_id.get_untracked();
         spawn_local(async move {
+            let canary = fetch_canary_status(&base).await;
+            canary_status.set(canary);
+
             match (
                 fetch_queue_snapshot(&base).await,
                 fetch_jobs_list(&base).await,
@@ -634,6 +644,8 @@ pub fn App() -> impl IntoView {
                 </div>
 
                 <div class="topbar-controls">
+                    <CanaryStatusPill status=canary_status />
+
                     <span class=move || if runner_busy() { "runner-pill runner-busy" } else { "runner-pill runner-idle" }>
                         {move || {
                             let active_slots: u32 = cluster_nodes.get().iter().map(|n| n.active_slots).sum();
@@ -891,6 +903,10 @@ pub fn App() -> impl IntoView {
                                         {move || format!("{} Nodes Online", cluster_nodes.get().iter().filter(|n| n.is_online).count())}
                                     </span>
                                 </div>
+                                <ClusterNodeLocksBar
+                                    nodes=cluster_nodes.into()
+                                    jobs=jobs_list.into()
+                                />
                                 <div class="cluster-nodes-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; padding: 12px 16px;">
                                     {move || {
                                         let nodes = cluster_nodes.get();
@@ -912,11 +928,12 @@ pub fn App() -> impl IntoView {
                                                 };
                                                 let status_label = if node.is_online { "Online" } else { "Offline" };
                                                 let (icon, role) = match node.node_id.as_str() {
-                                                    "entrance" => ("🖥️", "Fast Linter & Security Auditor (Intel N100)"),
-                                                    "rubicon" => ("⚡", "Heavy Compute & Cross-Compiler (HP Xeon E3-1245)"),
-                                                    "pey-wail-deu" => ("🔬", "Native Truth Engine & Ingress (SpacemiT K3)"),
+                                                    "control-node" => ("🖥️", "Fast Linter & Security Auditor (Intel N100)"),
+                                                    "storage-node" => ("⚡", "Heavy Compute & Cross-Compiler (Xeon E3)"),
+                                                    "worker-node" | "worker-riscv64" => ("🔬", "Native Truth Engine & Ingress (SpacemiT K3)"),
                                                     _ => ("⚙️", "Distributed Execution Node"),
                                                 };
+                                                let (is_excl_locked, excl_stage_id, max_conc_node) = node.resolve_exclusive_lock(&all_jobs);
                                                 let tags_str = node.tags.join(", ");
                                                 let border_style = if is_selected {
                                                     "border: 1px solid #58a6ff; box-shadow: 0 0 10px rgba(88, 166, 255, 0.25);"
@@ -978,6 +995,15 @@ pub fn App() -> impl IntoView {
                                                                 <div class="muted-text" style="font-size: 11px;">{role}</div>
                                                             </div>
                                                             <span class=status_pill>{status_label}</span>
+                                                        </div>
+                                                        <div style="margin-bottom: 8px;">
+                                                            <NodeExclusiveLockBadge
+                                                                node_id=node.node_id.clone()
+                                                                exclusive_locked=is_excl_locked
+                                                                owning_stage_id=excl_stage_id
+                                                                active_slots=node.active_slots
+                                                                max_concurrent_per_node=max_conc_node
+                                                            />
                                                         </div>
                                                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; font-size: 12px;">
                                                             <div>
@@ -1060,9 +1086,9 @@ pub fn App() -> impl IntoView {
                                             }
 
                                             let (icon, role) = match node.node_id.as_str() {
-                                                "entrance" => ("🖥️", "Fast Linter & Security Auditor (Intel N100)"),
-                                                "rubicon" => ("⚡", "Heavy Compute & Cross-Compiler (HP Xeon E3-1245)"),
-                                                "pey-wail-deu" => ("🔬", "Native Truth Engine & Ingress (SpacemiT K3)"),
+                                                "control-node" => ("🖥️", "Fast Linter & Security Auditor (Intel N100)"),
+                                                "storage-node" => ("⚡", "Heavy Compute & Cross-Compiler (Xeon E3)"),
+                                                "worker-node" | "worker-riscv64" => ("🔬", "Native Truth Engine & Ingress (SpacemiT K3)"),
                                                 _ => ("⚙️", "Distributed Execution Node"),
                                             };
 
@@ -1643,6 +1669,25 @@ pub fn App() -> impl IntoView {
                                                                 }).collect_view()}
                                                             </div>
                                                         </section>
+                                                    }
+                                                })}
+
+                                                // 3-Tier Declarative Pipeline Tree & MuIsolation Sandbox Telemetry Panels
+                                                {(!rec.stages.is_empty()).then(|| {
+                                                    let tree_stages = rec.stages.clone();
+                                                    let evt_type = rec.job.event_type.clone();
+                                                    let (telemetry, violations) = extract_sandbox_telemetry(&rec, &selected_job_log.get_untracked());
+                                                    view! {
+                                                        <div>
+                                                            <PipelineTreeView
+                                                                stages=tree_stages
+                                                                active_event=evt_type
+                                                            />
+                                                            <MuIsolationTelemetryPanel
+                                                                telemetry=telemetry
+                                                                violations=violations
+                                                            />
+                                                        </div>
                                                     }
                                                 })}
 

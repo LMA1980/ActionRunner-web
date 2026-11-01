@@ -1130,3 +1130,356 @@ body {
     font-size: 10px;
   }
 }
+
+/* ==========================================================================
+   Wave 3: Canary Status Pill, Node Exclusive Locks, 3-Tier Pipeline Tree
+   & MuIsolation Sandbox Telemetry
+   ========================================================================== */
+
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+.canary-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.canary-emerald {
+  background-color: rgba(46, 164, 79, 0.18);
+  color: #56d364;
+  border: 1px solid rgba(46, 164, 79, 0.45);
+}
+
+.canary-amber {
+  background-color: rgba(219, 171, 9, 0.2);
+  color: #e3b341;
+  border: 1px solid rgba(219, 171, 9, 0.5);
+}
+
+.canary-crimson {
+  background-color: rgba(218, 54, 51, 0.22);
+  color: #ff7b72;
+  border: 1px solid rgba(248, 81, 73, 0.6);
+}
+
+.canary-slate {
+  background-color: rgba(139, 148, 158, 0.16);
+  color: #c9d1d9;
+  border: 1px solid rgba(139, 148, 158, 0.35);
+}
+
+/* Exclusive Node Stage Locks (#16) */
+.node-lock-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.exclusive-lock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background-color: rgba(218, 54, 51, 0.2);
+  border: 1px solid rgba(248, 81, 73, 0.65);
+  color: #ff7b72;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.2px;
+}
+
+.slot-utilization-pill {
+  display: inline-flex;
+  align-items: center;
+  background-color: #21262d;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.cluster-locks-banner {
+  margin: 0 16px 8px;
+  padding: 10px 14px;
+  background-color: rgba(218, 54, 51, 0.12);
+  border: 1px solid rgba(248, 81, 73, 0.45);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.locks-banner-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ff7b72;
+  letter-spacing: 0.4px;
+}
+
+.locks-banner-items {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 3-Tier Pipeline Tree (#15) */
+.pipeline-stages-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pipeline-stage-card {
+  background-color: var(--bg-tile);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.pipeline-stage-summary {
+  padding: 10px 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  user-select: none;
+}
+
+.pipeline-stage-left,
+.pipeline-stage-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stage-wave-pill {
+  background-color: rgba(88, 166, 255, 0.15);
+  border: 1px solid rgba(88, 166, 255, 0.4);
+  color: var(--accent-blue);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.pipeline-stage-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.pipeline-stage-details {
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--border-subtle);
+  background-color: #0b0f15;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pipeline-dag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dag-edges-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dag-edge-badge {
+  background-color: #161b22;
+  border: 1px solid var(--border-color);
+  color: #c9d1d9;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.dag-edge-root {
+  color: #7ee787;
+  border-color: rgba(46, 164, 79, 0.4);
+}
+
+.pipeline-tasks-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pipeline-task-row {
+  background-color: var(--bg-tile);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pipeline-task-main,
+.pipeline-task-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sandbox-profile-chip {
+  background-color: rgba(168, 85, 247, 0.14);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  color: #c084fc;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 6px;
+}
+
+/* MuIsolation Sandbox Telemetry (#20) */
+.security-violation-alert {
+  background-color: rgba(218, 54, 51, 0.15);
+  border: 1px solid rgba(248, 81, 73, 0.65);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.violation-alert-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ff7b72;
+  margin-bottom: 10px;
+}
+
+.violation-alert-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.violation-alert-table th,
+.violation-alert-table td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(248, 81, 73, 0.25);
+  white-space: nowrap;
+}
+
+.violation-alert-table th {
+  color: #ff7b72;
+  font-weight: 700;
+}
+
+.violation-cell-req {
+  color: #ff7b72;
+  font-weight: 700;
+}
+
+.violation-cell-ceil {
+  color: #7ee787;
+  font-weight: 600;
+}
+
+.sandbox-telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.sandbox-stage-card {
+  background-color: var(--bg-tile);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sandbox-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sandbox-stage-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.sandbox-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.sandbox-kernel {
+  background-color: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+
+.sandbox-kvm {
+  background-color: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
+}
+
+.sandbox-card-metrics {
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ai-thread-pill {
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.ai-thread-active {
+  background-color: rgba(46, 164, 79, 0.18);
+  color: #56d364;
+  border: 1px solid rgba(46, 164, 79, 0.4);
+}
+
+.ai-thread-inactive {
+  background-color: #21262d;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+}
+
