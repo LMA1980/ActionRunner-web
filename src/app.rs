@@ -19,7 +19,7 @@ use crate::log_parser::{extract_stage_logs, parse_job_log, StepStatus};
 use crate::models::{
     extract_repositories, filter_jobs, is_scrolled_to_bottom, job_card_svg_url,
     job_submodule_card_svg_url, score_pill_class, short_branch, short_sha, ClusterNodeView,
-    JobRecord, JobStatus, JobsListResponse, QueueSnapshot, StageStatus,
+    JobRecord, JobStatus, JobsListResponse, QueueItemView, QueueSnapshot, StageStatus,
 };
 
 fn render_console_log_view(raw: &str) -> impl IntoView {
@@ -839,86 +839,126 @@ pub fn App() -> impl IntoView {
                             <section class="panel">
                                 <div class="panel-header">
                                     <h2 class="panel-title">"Live Webhook Queue Monitor"</h2>
-                                    <span class="panel-badge">
-                                        {move || {
-                                            let depth = queue_snap.get().map(|s| s.queue_depth).unwrap_or(0);
-                                            format!("{} Queued", depth)
-                                        }}
-                                    </span>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="panel-badge" style="color: #58a6ff;">
+                                            {move || {
+                                                let running = queue_snap
+                                                    .get()
+                                                    .map(|s| {
+                                                        if !s.active_jobs.is_empty() {
+                                                            s.active_jobs.len()
+                                                        } else if s.active_job.is_some() {
+                                                            1
+                                                        } else {
+                                                            0
+                                                        }
+                                                    })
+                                                    .unwrap_or(0);
+                                                format!("{} Executing", running)
+                                            }}
+                                        </span>
+                                        <span class="panel-badge">
+                                            {move || {
+                                                let depth = queue_snap.get().map(|s| s.queue_depth).unwrap_or(0);
+                                                format!("{} Queued", depth)
+                                            }}
+                                        </span>
+                                    </div>
                                 </div>
 
-                                // Active Running Job Spotlight
+                                // Active Running Jobs Spotlight (All parallel executing slots)
                                 {move || {
-                                    let active_opt = queue_snap.get().and_then(|s| s.active_job);
-                                    match active_opt {
-                                        Some(active) => {
-                                            let jid = active.record.job.id.clone();
-                                            let repo = active.record.job.repo_name.clone();
-                                            let branch = short_branch(&active.record.job.ref_name).to_string();
-                                            let sha = short_sha(&active.record.job.commit_sha).to_string();
-                                            let sender = active.record.job.sender.clone();
-                                            let evt = active.record.job.event_type.clone();
-                                            let elapsed = active.elapsed_secs.unwrap_or(0);
-                                            let stages = active.record.stages.clone();
-                                            view! {
-                                                <div class="active-job-spotlight">
-                                                    <div class="spotlight-left">
-                                                        <span class="status-pill status-running">"⏳ EXECUTING NOW"</span>
-                                                        <span class="job-repo">{repo}</span>
-                                                        <span class="branch-pill">{branch}</span>
-                                                        <span class="mono-chip">{sha}</span>
-                                                        <span class="muted-text">{format!("{} by @{}", evt, sender)}</span>
-                                                    </div>
-                                                    <div class="spotlight-right">
-                                                        <span class="mono-timer">{format!("Elapsed: {}s", elapsed)}</span>
-                                                        <button
-                                                            class="btn btn-primary"
-                                                            on:click=move |_| open_job_drilldown(jid.clone())
-                                                        >
-                                                            "Drill Down & Live Log →"
-                                                        </button>
-                                                    </div>
-                                                    {(!stages.is_empty()).then(|| view! {
-                                                        <div class="spotlight-stages-strip">
-                                                            <span class="sub-row-label">"PIPELINE ALLOCATION"</span>
-                                                            <div class="job-stages-pills">
-                                                                {stages.into_iter().map(|s| {
-                                                                    let (host_label, host_class) = s.compact_node_display();
-                                                                    let dur_or_status = match &s.status {
-                                                                        StageStatus::Completed { exit_code: 0, duration_secs } => format!("{}s ✓", duration_secs),
-                                                                        StageStatus::Completed { exit_code: _, duration_secs } => format!("{}s ✕", duration_secs),
-                                                                        StageStatus::Running { .. } => "⚡ active".to_string(),
-                                                                        StageStatus::Assigned { .. } => "🚀 leased".to_string(),
-                                                                        StageStatus::Failed { .. } => "✕ err".to_string(),
-                                                                        StageStatus::Skipped { .. } => "⊘ skip".to_string(),
-                                                                        StageStatus::Pending => "⏳ wait".to_string(),
-                                                                    };
-                                                                    let s_name = s.name.clone();
-                                                                    let s_title = format!("Stage '{}' on {}", s.name, host_label);
-                                                                    view! {
-                                                                        <span class=format!("stage-host-badge {}", host_class) title=s_title>
-                                                                            <span class="badge-stage-name">{s_name}</span>
-                                                                            <span class="badge-host-sep">"•"</span>
-                                                                            <span class="badge-host-name">{host_label}</span>
-                                                                            <span class="badge-stage-dur mono">{dur_or_status}</span>
-                                                                        </span>
-                                                                    }
-                                                                }).collect_view()}
-                                                            </div>
-                                                        </div>
-                                                    })}
-                                                </div>
-                                            }.into_any()
-                                        }
-                                        None => view! {
+                                    let active_list: Vec<QueueItemView> = queue_snap
+                                        .get()
+                                        .map(|s| {
+                                            if !s.active_jobs.is_empty() {
+                                                s.active_jobs
+                                            } else {
+                                                s.active_job.into_iter().collect()
+                                            }
+                                        })
+                                        .unwrap_or_default();
+
+                                    if active_list.is_empty() {
+                                        view! {
                                             <div class="queue-empty-active">
-                                                "No build currently executing — worker is idle and ready for incoming GitHub webhooks."
+                                                "No build currently executing — worker nodes are idle and ready for incoming GitHub webhooks."
+                                            </div>
+                                        }.into_any()
+                                    } else {
+                                        let total_active = active_list.len();
+                                        view! {
+                                            <div style="display: flex; flex-direction: column; gap: 10px;">
+                                                {active_list.into_iter().enumerate().map(|(slot_idx, active)| {
+                                                    let jid = active.record.job.id.clone();
+                                                    let repo = active.record.job.repo_name.clone();
+                                                    let branch = short_branch(&active.record.job.ref_name).to_string();
+                                                    let sha = short_sha(&active.record.job.commit_sha).to_string();
+                                                    let sender = active.record.job.sender.clone();
+                                                    let evt = active.record.job.event_type.clone();
+                                                    let elapsed = active.elapsed_secs.unwrap_or(0);
+                                                    let stages = active.record.stages.clone();
+                                                    let slot_label = if total_active > 1 {
+                                                        format!("⏳ EXECUTING ({}/{})", slot_idx + 1, total_active)
+                                                    } else {
+                                                        "⏳ EXECUTING NOW".to_string()
+                                                    };
+                                                    view! {
+                                                        <div class="active-job-spotlight">
+                                                            <div class="spotlight-left">
+                                                                <span class="status-pill status-running">{slot_label}</span>
+                                                                <span class="job-repo">{repo}</span>
+                                                                <span class="branch-pill">{branch}</span>
+                                                                <span class="mono-chip">{sha}</span>
+                                                                <span class="muted-text">{format!("{} by @{}", evt, sender)}</span>
+                                                            </div>
+                                                            <div class="spotlight-right">
+                                                                <span class="mono-timer">{format!("Elapsed: {}s", elapsed)}</span>
+                                                                <button
+                                                                    class="btn btn-primary"
+                                                                    on:click=move |_| open_job_drilldown(jid.clone())
+                                                                >
+                                                                    "Drill Down & Live Log →"
+                                                                </button>
+                                                            </div>
+                                                            {(!stages.is_empty()).then(|| view! {
+                                                                <div class="spotlight-stages-strip">
+                                                                    <span class="sub-row-label">"PIPELINE ALLOCATION"</span>
+                                                                    <div class="job-stages-pills">
+                                                                        {stages.into_iter().map(|s| {
+                                                                            let (host_label, host_class) = s.compact_node_display();
+                                                                            let dur_or_status = match &s.status {
+                                                                                StageStatus::Completed { exit_code: 0, duration_secs } => format!("{}s ✓", duration_secs),
+                                                                                StageStatus::Completed { exit_code: _, duration_secs } => format!("{}s ✕", duration_secs),
+                                                                                StageStatus::Running { .. } => "⚡ active".to_string(),
+                                                                                StageStatus::Assigned { .. } => "🚀 leased".to_string(),
+                                                                                StageStatus::Failed { .. } => "✕ err".to_string(),
+                                                                                StageStatus::Skipped { .. } => "⊘ skip".to_string(),
+                                                                                StageStatus::Pending => "⏳ wait".to_string(),
+                                                                            };
+                                                                            let s_name = s.name.clone();
+                                                                            let s_title = format!("Stage '{}' on {}", s.name, host_label);
+                                                                            view! {
+                                                                                <span class=format!("stage-host-badge {}", host_class) title=s_title>
+                                                                                    <span class="badge-stage-name">{s_name}</span>
+                                                                                    <span class="badge-host-sep">"•"</span>
+                                                                                    <span class="badge-host-name">{host_label}</span>
+                                                                                    <span class="badge-stage-dur mono">{dur_or_status}</span>
+                                                                                </span>
+                                                                            }
+                                                                        }).collect_view()}
+                                                                    </div>
+                                                                </div>
+                                                            })}
+                                                        </div>
+                                                    }
+                                                }).collect_view()}
                                             </div>
                                         }.into_any()
                                     }
                                 }}
 
-                                // Pending FIFO Queue Items
+                                // Pending FIFO Queue Items (including food-sampled jobs re-queued at their original priority)
                                 {move || {
                                     let queued = queue_snap.get().map(|s| s.queued_jobs).unwrap_or_default();
                                     if queued.is_empty() {
@@ -938,23 +978,67 @@ pub fn App() -> impl IntoView {
                                                     let branch = short_branch(&item.record.job.ref_name).to_string();
                                                     let sha = short_sha(&item.record.job.commit_sha).to_string();
                                                     let trigger = format!("{} by @{}", item.record.job.event_type, item.record.job.sender);
+                                                    let stages = item.record.stages.clone();
+                                                    let completed_stages = stages
+                                                        .iter()
+                                                        .filter(|s| matches!(s.status, StageStatus::Completed { exit_code: 0, .. }))
+                                                        .count();
+                                                    let total_stages = stages.len();
+                                                    let sample_badge = (completed_stages > 0 && total_stages > 0).then(|| {
+                                                        format!("✓ {}/{} stages pre-computed", completed_stages, total_stages)
+                                                    });
                                                     view! {
                                                         <div
                                                             class="queue-row"
+                                                            style="flex-direction: column; align-items: stretch; gap: 6px;"
                                                             on:click=move |_| open_job_drilldown(jid.clone())
                                                         >
-                                                            <div class="queue-row-left">
-                                                                <span class="queue-pos-badge">{format!("#{}", pos)}</span>
-                                                                <span class="status-pill status-queued">"⏱ QUEUED"</span>
-                                                                <span class="job-repo">{repo}</span>
-                                                                <span class="branch-pill">{branch}</span>
-                                                                <span class="mono-chip">{sha}</span>
-                                                                <span class="muted-text">{trigger}</span>
+                                                            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; gap: 8px;">
+                                                                <div class="queue-row-left">
+                                                                    <span class="queue-pos-badge">{format!("#{}", pos)}</span>
+                                                                    <span class="status-pill status-queued">"⏱ QUEUED"</span>
+                                                                    <span class="job-repo">{repo}</span>
+                                                                    <span class="branch-pill">{branch}</span>
+                                                                    <span class="mono-chip">{sha}</span>
+                                                                    {sample_badge.map(|lbl| view! {
+                                                                        <span class="status-pill status-completed" style="font-size: 11px;">{lbl}</span>
+                                                                    })}
+                                                                    <span class="muted-text">{trigger}</span>
+                                                                </div>
+                                                                <div class="queue-row-right">
+                                                                    <span class="muted-text mono">{format!("waiting {}s", wait)}</span>
+                                                                    <span class="drill-link">"Inspect →"</span>
+                                                                </div>
                                                             </div>
-                                                            <div class="queue-row-right">
-                                                                <span class="muted-text mono">{format!("waiting {}s", wait)}</span>
-                                                                <span class="drill-link">"Inspect →"</span>
-                                                            </div>
+                                                            {(!stages.is_empty() && completed_stages > 0).then(|| view! {
+                                                                <div class="spotlight-stages-strip" style="margin-top: 2px;">
+                                                                    <span class="sub-row-label">"PRE-COMPUTED"</span>
+                                                                    <div class="job-stages-pills">
+                                                                        {stages.into_iter().map(|s| {
+                                                                            let (host_label, host_class) = s.compact_node_display();
+                                                                            let dur_or_status = match &s.status {
+                                                                                StageStatus::Completed { exit_code: 0, duration_secs } => format!("{}s ✓", duration_secs),
+                                                                                StageStatus::Completed { exit_code: _, duration_secs } => format!("{}s ✕", duration_secs),
+                                                                                StageStatus::Running { .. } => "⚡ active".to_string(),
+                                                                                StageStatus::Assigned { .. } => "🚀 leased".to_string(),
+                                                                                StageStatus::Failed { .. } => "✕ err".to_string(),
+                                                                                StageStatus::Skipped { .. } => "⊘ skip".to_string(),
+                                                                                StageStatus::Pending => "⏳ wait".to_string(),
+                                                                            };
+                                                                            let s_name = s.name.clone();
+                                                                            let s_title = format!("Stage '{}' on {}", s.name, host_label);
+                                                                            view! {
+                                                                                <span class=format!("stage-host-badge {}", host_class) title=s_title>
+                                                                                    <span class="badge-stage-name">{s_name}</span>
+                                                                                    <span class="badge-host-sep">"•"</span>
+                                                                                    <span class="badge-host-name">{host_label}</span>
+                                                                                    <span class="badge-stage-dur mono">{dur_or_status}</span>
+                                                                                </span>
+                                                                            }
+                                                                        }).collect_view()}
+                                                                    </div>
+                                                                </div>
+                                                            })}
                                                         </div>
                                                     }
                                                 }).collect_view()}

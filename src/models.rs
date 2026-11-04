@@ -357,6 +357,8 @@ pub struct QueueSnapshot {
     #[serde(default)]
     pub active_job: Option<QueueItemView>,
     #[serde(default)]
+    pub active_jobs: Vec<QueueItemView>,
+    #[serde(default)]
     pub queued_jobs: Vec<QueueItemView>,
     #[serde(default)]
     pub stats: QueueStats,
@@ -735,5 +737,118 @@ mod tests {
         assert!(is_scrolled_to_bottom(2000, 650, 1360, 40));
         // Content shorter than container (fits entirely on screen): distance = -250 <= 40
         assert!(is_scrolled_to_bottom(400, 650, 0, 40));
+    }
+
+    #[test]
+    fn test_queue_snapshot_multiple_active_and_precomputed_queued_jobs() {
+        let mut precomputed_record =
+            sample_record("job-3", "LMA1980/k3-engine", "3333cccc", JobStatus::Queued);
+        precomputed_record.stages = vec![
+            StageRecord {
+                id: "fmt-check".to_string(),
+                name: "fmt-check".to_string(),
+                tags: vec!["fmt".to_string()],
+                threads: 2,
+                toolchain: None,
+                depends_on: vec![],
+                status: StageStatus::Completed {
+                    exit_code: 0,
+                    duration_secs: 3,
+                },
+                assigned_node: Some("node-a".to_string()),
+                exclusive: false,
+                max_concurrent_per_node: 1,
+                tasks: vec![],
+                sandbox_telemetry: None,
+            },
+            StageRecord {
+                id: "test-check".to_string(),
+                name: "test-check".to_string(),
+                tags: vec!["k3".to_string()],
+                threads: 6,
+                toolchain: Some("llvm-24".to_string()),
+                depends_on: vec!["fmt-check".to_string()],
+                status: StageStatus::Pending,
+                assigned_node: None,
+                exclusive: true,
+                max_concurrent_per_node: 1,
+                tasks: vec![],
+                sandbox_telemetry: None,
+            },
+        ];
+
+        let orig = QueueSnapshot {
+            status: "ok".to_string(),
+            concurrency: 3,
+            queue_depth: 1,
+            active_job: Some(QueueItemView {
+                position: 0,
+                wait_secs: 2,
+                elapsed_secs: Some(15),
+                record: sample_record(
+                    "job-1",
+                    "LMA1980/model-runner",
+                    "1111aaaa",
+                    JobStatus::Running {
+                        started_at: Utc::now(),
+                    },
+                ),
+            }),
+            active_jobs: vec![
+                QueueItemView {
+                    position: 0,
+                    wait_secs: 2,
+                    elapsed_secs: Some(15),
+                    record: sample_record(
+                        "job-1",
+                        "LMA1980/model-runner",
+                        "1111aaaa",
+                        JobStatus::Running {
+                            started_at: Utc::now(),
+                        },
+                    ),
+                },
+                QueueItemView {
+                    position: 0,
+                    wait_secs: 5,
+                    elapsed_secs: Some(8),
+                    record: sample_record(
+                        "job-2",
+                        "LMA1980/k3-core",
+                        "2222bbbb",
+                        JobStatus::Running {
+                            started_at: Utc::now(),
+                        },
+                    ),
+                },
+            ],
+            queued_jobs: vec![QueueItemView {
+                position: 1,
+                wait_secs: 42,
+                elapsed_secs: None,
+                record: precomputed_record,
+            }],
+            stats: QueueStats {
+                total_jobs: 3,
+                running_jobs: 2,
+                queued_jobs: 1,
+                ..Default::default()
+            },
+            recent_jobs: vec![],
+        };
+
+        let payload = serde_json::to_string(&orig).unwrap();
+        let snap: QueueSnapshot = serde_json::from_str(&payload).unwrap();
+        assert_eq!(snap.active_jobs.len(), 2);
+        assert_eq!(snap.active_jobs[0].record.job.id, "job-1");
+        assert_eq!(snap.active_jobs[1].record.job.id, "job-2");
+        assert_eq!(snap.queued_jobs.len(), 1);
+        let precomputed = snap.queued_jobs[0]
+            .record
+            .stages
+            .iter()
+            .filter(|st| matches!(st.status, StageStatus::Completed { .. }))
+            .count();
+        assert_eq!(precomputed, 1);
     }
 }
