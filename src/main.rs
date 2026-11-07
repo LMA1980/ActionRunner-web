@@ -1,5 +1,5 @@
-use action_runner_web::app::App;
 use leptos::prelude::*;
+use mu_ci_web::app::App;
 
 fn main() {
     mount_to_body(App);

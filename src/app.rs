@@ -429,7 +429,7 @@ pub fn App() -> impl IntoView {
                     selected_job_log.set(txt);
                     scroll_to_tail();
                 }
-                Err(e) => selected_job_log.set(format!("[ActionRunner-web] {}", e)),
+                Err(e) => selected_job_log.set(format!("[mu-ci-web] {}", e)),
             }
             log_loading.set(false);
         });

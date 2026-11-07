@@ -719,8 +719,8 @@ mod tests {
             job: Job {
                 id: "job-42".to_string(),
                 event_type: "push".to_string(),
-                repo_name: "LMA1980/ActionRunner-web".to_string(),
-                clone_url: "https://github.com/LMA1980/ActionRunner-web.git".to_string(),
+                repo_name: "LMA1980/mu-ci-web".to_string(),
+                clone_url: "https://github.com/LMA1980/mu-ci-web.git".to_string(),
                 commit_sha: "9ca1c51a887766554433221100ffeeddccbbaa99".to_string(),
                 ref_name: "refs/heads/main".to_string(),
                 sender: "LMA1980".to_string(),

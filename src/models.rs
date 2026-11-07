@@ -668,12 +668,8 @@ mod tests {
             "/cards/LMA1980/model-runner/main/card.svg"
         );
         assert_eq!(
-            card_svg_url(
-                "",
-                "LMA1980/ActionRunner-web",
-                "feat/first-view-host-attribution"
-            ),
-            "/cards/LMA1980/ActionRunner-web/card.svg?branch=feat/first-view-host-attribution"
+            card_svg_url("", "LMA1980/mu-ci-web", "feat/first-view-host-attribution"),
+            "/cards/LMA1980/mu-ci-web/card.svg?branch=feat/first-view-host-attribution"
         );
         assert_eq!(
             job_card_svg_url("", "job-1792858126-9ca1c51a-2", 1792858557),

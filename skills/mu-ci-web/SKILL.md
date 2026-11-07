@@ -1,9 +1,9 @@
 ---
-name: action-runner-web-wasm
-description: "Build and style the ActionRunner-web Leptos WASM SPA frontend with dual-layer static caching and mobile viewport compliance."
+name: mu-ci-web
+description: "Build and style the mu-ci-web Leptos WASM SPA frontend with dual-layer static caching and mobile viewport compliance."
 ---
 
-# `action-runner-web` Leptos WASM & Mobile Viewport Invariants
+# `mu-ci-web` Leptos WASM & Mobile Viewport Invariants
 
 ## 1. Dual-Layer Static Asset Caching
 
