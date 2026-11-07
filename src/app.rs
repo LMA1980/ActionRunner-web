@@ -263,6 +263,15 @@ async fn fetch_job_log_text(api_base: &str, job_id: &str) -> Result<String, Stri
             .await
             .map_err(|e| format!("Failed reading log text: {}", e)),
         _ => {
+            let obs_url = format!("{}/api/obs/v1/jobs/{}/log", api_base, job_id);
+            if let Ok(obs_resp) = Request::get(&obs_url).send().await {
+                if obs_resp.ok() {
+                    return obs_resp
+                        .text()
+                        .await
+                        .map_err(|e| format!("Failed reading sanitized log text: {}", e));
+                }
+            }
             let fallback_url = format!("{}/jobs/{}/log", api_base, job_id);
             let resp = Request::get(&fallback_url)
                 .send()
