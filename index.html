@@ -6,18 +6,18 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <title>ActionRunner-rs • Queue Monitor &amp; Factory Pipeline</title>
+    <title>mu-ci-web • Queue Monitor &amp; Factory Pipeline</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <script type="module">
-      import init from './action-runner-web.js';
-      init('./action-runner-web_bg.wasm').catch(err => {
-        console.error("Failed to initialize ActionRunner-web Leptos WASM:", err);
+      import init from './mu-ci-web.js';
+      init('./mu-ci-web_bg.wasm').catch(err => {
+        console.error("Failed to initialize mu-ci-web Leptos WASM:", err);
         const container = document.createElement('div');
         container.style.cssText = 'padding: 30px; font-family: sans-serif; color: #ff7b72; background: #0d1117;';
         const heading = document.createElement('h2');
-        heading.textContent = 'ActionRunner-web Initialization Error';
+        heading.textContent = 'mu-ci-web Initialization Error';
         const pre = document.createElement('pre');
         pre.textContent = String(err);
         container.appendChild(heading);

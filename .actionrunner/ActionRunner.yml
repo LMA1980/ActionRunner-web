@@ -1,5 +1,5 @@
 version: "3"
-name: "ActionRunner-web 3-Tier Declarative Pipeline: Hygiene, Build, Test, Coverage & Miri"
+name: "mu-ci-web 3-Tier Declarative Pipeline"
 
 env:
   CARGO_TERM_COLOR: "always"

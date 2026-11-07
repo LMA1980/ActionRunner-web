@@ -1,16 +1,16 @@
-# ActionRunner-web
+# mu-ci-web
 
 <p align="center">
   <a href="https://hook.lma1980.duckdns.org/jobs">
-    <img src="https://hook.lma1980.duckdns.org/cards/LMA1980/ActionRunner-web/card.svg" alt="ActionRunner-web Factory Scorecard" width="520"/>
+    <img src="https://hook.lma1980.duckdns.org/cards/LMA1980/mu-ci-web/card.svg" alt="mu-ci-web Factory Scorecard" width="520"/>
   </a>
 </p>
 
 <p align="center">
-  <a href="https://hook.lma1980.duckdns.org/jobs"><img src="https://hook.lma1980.duckdns.org/badges/LMA1980/ActionRunner-web/status.svg" alt="CI Status"/></a>
-  <a href="https://hook.lma1980.duckdns.org/jobs"><img src="https://hook.lma1980.duckdns.org/badges/LMA1980/ActionRunner-web/score.svg" alt="Quality Score"/></a>
-  <a href="https://hook.lma1980.duckdns.org/jobs"><img src="https://hook.lma1980.duckdns.org/badges/LMA1980/ActionRunner-web/coverage.svg" alt="Coverage"/></a>
-  <a href="https://hook.lma1980.duckdns.org/jobs"><img src="https://hook.lma1980.duckdns.org/badges/LMA1980/ActionRunner-web/benchmark.svg" alt="Benchmark"/></a>
+  <a href="https://hook.lma1980.duckdns.org/jobs"><img src="https://hook.lma1980.duckdns.org/badges/LMA1980/mu-ci-web/status.svg" alt="CI Status"/></a>
+  <a href="https://hook.lma1980.duckdns.org/jobs"><img src="https://hook.lma1980.duckdns.org/badges/LMA1980/mu-ci-web/score.svg" alt="Quality Score"/></a>
+  <a href="https://hook.lma1980.duckdns.org/jobs"><img src="https://hook.lma1980.duckdns.org/badges/LMA1980/mu-ci-web/coverage.svg" alt="Coverage"/></a>
+  <a href="https://hook.lma1980.duckdns.org/jobs"><img src="https://hook.lma1980.duckdns.org/badges/LMA1980/mu-ci-web/benchmark.svg" alt="Benchmark"/></a>
 </p>
 
 ---
@@ -56,12 +56,12 @@ High-performance WebAssembly queue monitoring and job drill-down frontend built 
                   (/, /style.css, │           │ (/webhook, /api/*, /queue,
                    /pkg/*.wasm)   │           │  /cards/*, /badges/*)
                                   ▼           ▼
-                         [ ActionRunner-web ] [ ActionRunner-rs ]
+                         [ mu-ci-web ]        [ ActionRunner-rs ]
                            (Leptos 0.8.22)     (Rust CI Sidecar)
 ```
 
 - Nginx reverse-proxies `/api/*`, `/queue`, `/webhook`, `/cards/*`, and `/badges/*` to `ActionRunner-rs` running on `127.0.0.1:8000`.
-- Nginx serves the compiled Leptos WASM bundle from `/home/lma1980/repository/ActionRunner-web/dist`.
+- Nginx serves the compiled Leptos WASM bundle from `/home/lma1980/repository/mu-ci-web/dist`.
 - When an API URL query parameter `?api=https://...` is passed, the frontend automatically points its requests to the specified endpoint.
 
 ---

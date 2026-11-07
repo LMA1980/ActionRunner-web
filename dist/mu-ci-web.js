@@ -1,4 +1,4 @@
-/* @ts-self-types="./action-runner-web.d.ts" */
+/* @ts-self-types="./mu-ci-web.d.ts" */
 
 export class IntoUnderlyingByteSource {
     __destroy_into_raw() {
@@ -646,7 +646,7 @@ function __wbg_get_imports() {
     };
     return {
         __proto__: null,
-        "./action-runner-web_bg.js": import0,
+        "./mu-ci-web_bg.js": import0,
     };
 }
 
@@ -985,7 +985,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (module_or_path === undefined) {
-        module_or_path = new URL('action-runner-web_bg.wasm', import.meta.url);
+        module_or_path = new URL('mu-ci-web_bg.wasm', import.meta.url);
     }
     const imports = __wbg_get_imports();
 

@@ -1,4 +1,4 @@
-# ActionRunner-web Development & Deployment Guidelines
+# mu-ci-web Development & Deployment Guidelines
 
 > [!IMPORTANT]
 > **Scope of `AGENTS.md`**: This file is reserved strictly for **immediate, universal behavioral rules and hard invariants** that govern every agent interaction. Do NOT place occasional notes, component designs, framework preferences, or operational runbooks here; those belong in repository-specific documentation (`README.md`, `specs/`, or `docs/`).
