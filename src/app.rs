@@ -483,17 +483,25 @@ pub fn App() -> impl IntoView {
         use wasm_bindgen::closure::Closure;
         use wasm_bindgen::JsCast;
 
+        type PollTimerHandle = (i32, Closure<dyn FnMut()>);
+
         let active_es: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
+        let active_poll_timer: Rc<RefCell<Option<PollTimerHandle>>> = Rc::new(RefCell::new(None));
 
         Effect::new(move |_| {
             let base = api_base.get();
             let active_job = selected_job_id.get();
             let enabled = auto_refresh.get();
 
-            // Always close existing EventSource before establishing a new one
+            // Always close existing EventSource and fallback poll timer before establishing new ones
             if let Some(old_es) = active_es.borrow_mut().take() {
                 old_es.close();
                 push_connected.set(false);
+            }
+            if let Some((timer_id, _cb)) = active_poll_timer.borrow_mut().take() {
+                if let Some(win) = web_sys::window() {
+                    win.clear_interval_with_handle(timer_id);
+                }
             }
 
             if !enabled {
@@ -598,6 +606,26 @@ pub fn App() -> impl IntoView {
 
                         *active_es.borrow_mut() = Some(es);
                     }
+
+                    if let Some(win) = web_sys::window() {
+                        let cb = Closure::wrap(Box::new(move || {
+                            let has_active = jobs_list
+                                .get_untracked()
+                                .iter()
+                                .any(|r| r.status.is_active());
+                            if !push_connected.get_untracked() || has_active {
+                                refresh_all();
+                            }
+                        }) as Box<dyn FnMut()>);
+                        if let Ok(timer_id) = win
+                            .set_interval_with_callback_and_timeout_and_arguments_0(
+                                cb.as_ref().unchecked_ref(),
+                                3_000,
+                            )
+                        {
+                            *active_poll_timer.borrow_mut() = Some((timer_id, cb));
+                        }
+                    }
                 }
                 Some(job_id) => {
                     // 2. Job Drill-Down View: Push events for Job metadata and real-time execution log stream
@@ -629,6 +657,13 @@ pub fn App() -> impl IntoView {
                             Closure::wrap(Box::new(move |ev: web_sys::MessageEvent| {
                                 if let Some(txt) = ev.data().as_string() {
                                     if let Ok(rec) = serde_json::from_str::<JobRecord>(&txt) {
+                                        jobs_list.update(|list| {
+                                            if let Some(existing) =
+                                                list.iter_mut().find(|r| r.job.id == rec.job.id)
+                                            {
+                                                *existing = rec.clone();
+                                            }
+                                        });
                                         selected_job_record.set(Some(rec));
                                         last_updated.set(
                                             Utc::now().format("%H:%M:%S UTC (Live)").to_string(),
@@ -680,6 +715,55 @@ pub fn App() -> impl IntoView {
                         on_log_chunk.forget();
 
                         *active_es.borrow_mut() = Some(es);
+                    }
+
+                    // Active-job drilldown fallback poll (#41): keeps stage status and log tail live
+                    // across HA controller failovers or SSE reconnects while non-terminal.
+                    if let Some(win) = web_sys::window() {
+                        let poll_base = base.clone();
+                        let poll_jid = job_id.clone();
+                        let cb = Closure::wrap(Box::new(move || {
+                            let is_active = selected_job_record
+                                .get_untracked()
+                                .as_ref()
+                                .is_none_or(|r| r.status.is_active());
+                            if !is_active && push_connected.get_untracked() {
+                                return;
+                            }
+                            let base_c = poll_base.clone();
+                            let jid_c = poll_jid.clone();
+                            spawn_local(async move {
+                                if let Ok(rec) = fetch_single_job(&base_c, &jid_c).await {
+                                    jobs_list.update(|list| {
+                                        if let Some(existing) =
+                                            list.iter_mut().find(|r| r.job.id == rec.job.id)
+                                        {
+                                            *existing = rec.clone();
+                                        }
+                                    });
+                                    selected_job_record.set(Some(rec));
+                                    last_updated
+                                        .set(Utc::now().format("%H:%M:%S UTC (Live)").to_string());
+                                }
+                                if let Ok(log_txt) = fetch_job_log_text(&base_c, &jid_c).await {
+                                    if selected_job_log.get_untracked() != log_txt {
+                                        selected_job_log.set(log_txt);
+                                        log_loading.set(false);
+                                        if follow_tail.get_untracked() {
+                                            scroll_to_tail();
+                                        }
+                                    }
+                                }
+                            });
+                        }) as Box<dyn FnMut()>);
+                        if let Ok(timer_id) = win
+                            .set_interval_with_callback_and_timeout_and_arguments_0(
+                                cb.as_ref().unchecked_ref(),
+                                2_000,
+                            )
+                        {
+                            *active_poll_timer.borrow_mut() = Some((timer_id, cb));
+                        }
                     }
                 }
             }
