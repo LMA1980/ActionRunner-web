@@ -380,6 +380,10 @@ pub struct JobsListResponse {
 }
 
 impl JobStatus {
+    pub fn is_active(&self) -> bool {
+        matches!(self, JobStatus::Queued | JobStatus::Running { .. })
+    }
+
     pub fn category(&self) -> &'static str {
         match self {
             JobStatus::Queued => "queued",
@@ -846,5 +850,27 @@ mod tests {
             .filter(|st| matches!(st.status, StageStatus::Completed { .. }))
             .count();
         assert_eq!(precomputed, 1);
+    }
+
+    #[test]
+    fn test_job_status_is_active() {
+        assert!(JobStatus::Queued.is_active());
+        assert!(JobStatus::Running {
+            started_at: Utc::now()
+        }
+        .is_active());
+        assert!(!JobStatus::Completed {
+            duration_secs: 5,
+            exit_code: 0
+        }
+        .is_active());
+        assert!(!JobStatus::Failed {
+            error: "boom".into()
+        }
+        .is_active());
+        assert!(!JobStatus::Skipped {
+            reason: "Superseded".into()
+        }
+        .is_active());
     }
 }
